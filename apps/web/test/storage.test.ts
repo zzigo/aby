@@ -18,3 +18,9 @@ test('logical catalog keys map below the configured Wasabi root', () => {
   expect(toWasabiKey('ref/20 late/Gavin Bryars/example.mp3', 'zzttuntref/')).toBe('zzttuntref/ref/20 late/Gavin Bryars/example.mp3');
   expect(toWasabiKey('aby/aud/20L/bryars/example.mp3', 'zzttuntref')).toBe('zzttuntref/aby/aud/20L/bryars/example.mp3');
 });
+
+test('legacy source keys preserve their exact Unicode form', () => {
+  const decomposed = 'ref/experimental/TA\u0303ªte.mp3';
+  expect(assertSourceObjectKey(decomposed)).toBe(decomposed);
+  expect(toWasabiKey(decomposed, 'zzttuntref/')).toBe(`zzttuntref/${decomposed}`);
+});

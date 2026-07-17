@@ -2,7 +2,7 @@ import { CopyObjectCommand, DeleteObjectCommand, GetObjectCommand, HeadObjectCom
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { createWriteStream } from 'node:fs';
 import { readFile } from 'node:fs/promises';
-import { extname } from 'node:path';
+import { dirname, extname } from 'node:path';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import type { Asset } from '@zztt/aby-domain';
@@ -10,7 +10,9 @@ import { AbyError } from './errors';
 import { readConfig } from './config';
 
 export function normalizeObjectKey(value: string): string {
-  return value.normalize('NFC').replaceAll('\\', '/').replace(/^\/+/, '').replace(/\/{2,}/g, '/');
+  // Legacy Wasabi keys are byte-sensitive. Do not apply Unicode normalization here:
+  // composed/decomposed forms can look identical while naming different S3 objects.
+  return value.replaceAll('\\', '/').replace(/^\/+/, '').replace(/\/{2,}/g, '/');
 }
 
 export function assertAbyObjectKey(value: string, prefix = 'aby/'): string {
@@ -213,26 +215,26 @@ export async function listWasabiSiblingKeys(objectKey: string): Promise<string[]
   const dir = lastSlash !== -1 ? key.substring(0, lastSlash) : '';
   const physicalPrefix = `${root}${dir}/`;
   
-  const response = await wasabiClient().send(new ListObjectsV2Command({
-    Bucket: bucket,
-    Prefix: physicalPrefix
-  }));
-
   const keys: string[] = [];
-  if (response.Contents) {
-    for (const obj of response.Contents) {
-      if (!obj.Key || obj.Key.endsWith('/')) continue;
-      
-      const dotIndex = obj.Key.lastIndexOf('.');
-      const ext = dotIndex !== -1 ? obj.Key.substring(dotIndex).toLowerCase() : '';
-      if (!['.mp3', '.wav', '.m4a', '.flac', '.ogg', '.aac', '.mp4', '.mov'].includes(ext)) continue;
-      
-      let logicalKey = obj.Key;
-      if (root && logicalKey.startsWith(root)) {
-        logicalKey = logicalKey.substring(root.length);
+  let continuationToken: string | undefined;
+  do {
+    const response = await wasabiClient().send(new ListObjectsV2Command({
+      Bucket: bucket,
+      Prefix: physicalPrefix,
+      ContinuationToken: continuationToken
+    }));
+    if (response.Contents) {
+      for (const obj of response.Contents) {
+        if (!obj.Key || obj.Key.endsWith('/')) continue;
+        const ext = extname(obj.Key).toLowerCase();
+        if (!['.mp3', '.wav', '.m4a', '.flac', '.ogg', '.aac', '.mp4', '.mov'].includes(ext)) continue;
+        let logicalKey = obj.Key;
+        if (root && logicalKey.startsWith(root)) logicalKey = logicalKey.substring(root.length);
+        if (dirname(logicalKey) !== dir) continue;
+        keys.push(logicalKey);
       }
-      keys.push(logicalKey);
     }
-  }
-  return keys.sort();
+    continuationToken = response.IsTruncated ? response.NextContinuationToken : undefined;
+  } while (continuationToken);
+  return keys.sort((left, right) => left.localeCompare(right, undefined, { numeric: true }));
 }
