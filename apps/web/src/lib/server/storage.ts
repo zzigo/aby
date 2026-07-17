@@ -1,4 +1,4 @@
-import { GetObjectCommand, HeadObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import { CopyObjectCommand, DeleteObjectCommand, GetObjectCommand, HeadObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { createWriteStream } from 'node:fs';
 import { Readable } from 'node:stream';
@@ -73,6 +73,57 @@ export async function downloadWasabiSourceObject(objectKey: string, destinationP
     throw new AbyError('source_stream_unavailable', 'Wasabi did not return a readable source stream', 502);
   }
   await pipeline(response.Body, createWriteStream(destinationPath, { flags: 'wx' }));
+}
+
+export async function downloadWasabiObject(objectKey: string, destinationPath: string): Promise<void> {
+  const config = readConfig();
+  const key = assertAbyObjectKey(objectKey, config.storagePrefix);
+  const response = await wasabiClient().send(new GetObjectCommand({
+    Bucket: config.WASABI_BUCKET!,
+    Key: toWasabiKey(key, config.wasabiRootPrefix)
+  }));
+  if (!(response.Body instanceof Readable)) {
+    throw new AbyError('canonical_stream_unavailable', 'Wasabi did not return a readable canonical stream', 502);
+  }
+  await pipeline(response.Body, createWriteStream(destinationPath, { flags: 'wx' }));
+}
+
+async function canonicalHeadOrNull(objectKey: string) {
+  try {
+    return await headWasabiObject(objectKey);
+  } catch (error) {
+    if (typeof error === 'object' && error && '$metadata' in error && (error as { $metadata?: { httpStatusCode?: number } }).$metadata?.httpStatusCode === 404) {
+      return null;
+    }
+    throw error;
+  }
+}
+
+export async function copyWasabiSourceToCanonical(sourceObjectKey: string, targetObjectKey: string) {
+  const config = readConfig();
+  const sourceKey = assertSourceObjectKey(sourceObjectKey, [config.sourceAudioPrefix, config.sourceVideoPrefix]);
+  const targetKey = assertAbyObjectKey(targetObjectKey, config.storagePrefix);
+  const existing = await canonicalHeadOrNull(targetKey);
+  if (existing) return { created: false, sourceObjectKey: sourceKey, targetObjectKey: targetKey, head: existing };
+  const bucket = config.WASABI_BUCKET!;
+  const physicalSource = toWasabiKey(sourceKey, config.wasabiRootPrefix);
+  await wasabiClient().send(new CopyObjectCommand({
+    Bucket: bucket,
+    Key: toWasabiKey(targetKey, config.wasabiRootPrefix),
+    CopySource: encodeURIComponent(`${bucket}/${physicalSource}`),
+    MetadataDirective: 'COPY'
+  }));
+  const head = await headWasabiObject(targetKey);
+  return { created: true, sourceObjectKey: sourceKey, targetObjectKey: targetKey, head };
+}
+
+export async function deleteWasabiCanonicalObject(objectKey: string): Promise<void> {
+  const config = readConfig();
+  const key = assertAbyObjectKey(objectKey, config.storagePrefix);
+  await wasabiClient().send(new DeleteObjectCommand({
+    Bucket: config.WASABI_BUCKET!,
+    Key: toWasabiKey(key, config.wasabiRootPrefix)
+  }));
 }
 
 export async function playbackUrl(asset: Asset): Promise<{ url: string; expiresAt: string }> {

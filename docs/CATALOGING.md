@@ -58,6 +58,7 @@ select one source object or folder
 → human preview
 → copy to canonical key
 → verify bytes, metadata and playback
+→ mark the legacy source as a deletion candidate
 → switch PostgreSQL authority
 → explicitly retire legacy source
 ```

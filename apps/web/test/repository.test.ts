@@ -32,4 +32,24 @@ describe('preview-before-write repository flow', () => {
     const asset = await repository.commitPreview('owner-a', preview.id, 'Work', 'Recording');
     expect(await repository.getAsset('owner-b', asset.id)).toBeNull();
   });
+
+  test('promotion switches authority and preserves the source as retirement provenance', async () => {
+    const repository = new MemoryAbyRepository();
+    const source = fixturePreview();
+    source.provider = 'wasabi';
+    source.bucket = 'private';
+    source.objectKey = 'ref/20 late/example.mp3';
+    source.candidateMetadata.canonicalObjectKey = 'aby/aud/20L/example/work/recording/work.mp3';
+    const preview = await repository.savePreview(source);
+    const promoted = await repository.markPreviewPromoted(
+      'owner-a',
+      preview.id,
+      source.objectKey,
+      source.candidateMetadata.canonicalObjectKey
+    );
+    expect(promoted.objectKey).toBe(source.candidateMetadata.canonicalObjectKey);
+    expect(promoted.provenance.parameters.sourceObjectKey).toBe(source.objectKey);
+    const asset = await repository.commitPreview('owner-a', preview.id, 'Work', 'Recording');
+    expect(asset.objectKey).toBe(source.candidateMetadata.canonicalObjectKey);
+  });
 });

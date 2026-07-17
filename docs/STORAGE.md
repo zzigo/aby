@@ -29,8 +29,9 @@ There is exactly one active binary authority per asset.
 2. Preview records the legacy key, SHA-256, technical metadata and proposed canonical key.
 3. Promotion performs a server-side copy because S3 has no native rename.
 4. Aby verifies size, checksum, ffprobe identity and playback at the destination.
-5. PostgreSQL switches the asset's active object key only after verification.
-6. Retirement of the legacy object is a separate, explicit step.
+5. The legacy key enters `aby.source_retirement_candidates` with state `candidate`.
+6. PostgreSQL switches the asset's active object key only after verification.
+7. Retirement of the legacy object is a separate, explicit approval and deletion step.
 
 The original filename, object key, directory, provider, checksum, import batch and timestamps remain permanently recorded as provenance. The system must never leave two objects marked active.
 

@@ -99,6 +99,11 @@ export const SourceIngestPreviewRequestSchema = z.object({
 });
 export type SourceIngestPreviewRequest = z.infer<typeof SourceIngestPreviewRequestSchema>;
 
+export const PromoteIngestSchema = z.object({
+  previewId: IdentifierSchema
+});
+export type PromoteIngest = z.infer<typeof PromoteIngestSchema>;
+
 export const IngestPreviewSchema = z.object({
   id: IdentifierSchema,
   ownerId: z.string().min(1),

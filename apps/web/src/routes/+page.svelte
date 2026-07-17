@@ -72,6 +72,21 @@
     }
   }
 
+  async function promoteCandidate() {
+    if (!preview) return;
+    busy = true;
+    status = 'Copying one object to Aby and verifying its SHA-256…';
+    try {
+      const result = await request('/api/ingest/promote', { previewId: preview.id });
+      preview = result.preview;
+      status = `Canonical copy verified. ${result.sourceRetirement.objectKey} is now a deletion candidate; the source remains intact.`;
+    } catch (error) {
+      status = error instanceof Error ? error.message : 'Promotion failed';
+    } finally {
+      busy = false;
+    }
+  }
+
   async function createSegment() {
     if (!asset) return;
     busy = true;
@@ -139,7 +154,11 @@
       {#if preview}
         <label>Work title<input bind:value={workTitle} /></label>
         <label>Recording title<input bind:value={recordingTitle} /></label>
-        <button class="primary" onclick={commitCandidate} disabled={busy || Boolean(asset) || requiresPromotion}>{requiresPromotion ? 'Promotion requires review' : 'Commit canonical metadata'}</button>
+        {#if requiresPromotion}
+          <button class="primary" onclick={promoteCandidate} disabled={busy || Boolean(asset)}>Promote to Aby</button>
+        {:else}
+          <button class="primary" onclick={commitCandidate} disabled={busy || Boolean(asset)}>Commit canonical metadata</button>
+        {/if}
       {:else}
         <p>Candidate metadata will appear here. It remains editable until explicit commit.</p>
       {/if}
