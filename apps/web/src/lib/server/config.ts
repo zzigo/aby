@@ -22,6 +22,8 @@ const EnvironmentSchema = z.object({
   ABY_PRESIGNED_URL_TTL_SECONDS: z.coerce.number().int().min(60).max(900).default(300),
   FFPROBE_PATH: z.string().trim().default('ffprobe'),
   FFPROBE_TIMEOUT_MS: z.coerce.number().int().min(1_000).max(120_000).default(30_000),
+  FFMPEG_PATH: z.string().trim().default('ffmpeg'),
+  FFMPEG_ANALYSIS_TIMEOUT_MS: z.coerce.number().int().min(10_000).max(1_800_000).default(900_000),
   LOGTO_ISSUER_URL: optionalText,
   LOGTO_CLIENT_ID: optionalText,
   LOGTO_CLIENT_SECRET: optionalText,

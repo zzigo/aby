@@ -19,6 +19,7 @@
     "validate": "bun run lint && bun run typecheck && bun run test && bun run build",
     "db:migrate": "bun --filter @aby/web db:migrate",
     "ingest:preview": "bun --filter @aby/web ingest:preview",
+    "spectrogram:generate": "bun --filter @aby/web spectrogram:generate",
     "logto:provision": "bun scripts/provision-logto.ts",
     "tunnel:vps": "bash scripts/tunnel-vps.sh"
   },

@@ -44,6 +44,10 @@ aby/aud/<collection>/<entity>/<Work>/<Recording>/<Asset>
 
 Recording folders remain human-readable and editable in preview. The first convention is `year-label`, preserving Unicode and replacing spaces with hyphens: `1990-Les-Disques-du-Crépuscule`. Catalog numbers remain structured release metadata and never enter the folder name. The recording's database title remains its human title; identity never depends only on path text because PostgreSQL stores stable UUIDs and external identifiers.
 
+The player catalog derives recent folders, favorites and its expandable tree only from committed object keys below `aby/aud/` and `aby/mov/`. Legacy `ref/` and `mov/` sources never appear in catalog navigation. They remain ingest/retirement inputs until their object-by-object adoption is reviewed.
+
+Checksum-bound machine artifacts live outside the human catalog spine below `aby/_analysis/<asset-id>/<sha256>/`. They are not masters and do not become navigable music or cinema folders.
+
 ## One-work adoption protocol
 
 There is no bulk ingestion by default.

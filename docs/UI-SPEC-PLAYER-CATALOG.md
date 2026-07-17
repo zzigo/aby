@@ -9,9 +9,10 @@ This surface is a hyperinstrument, not an administration table. Media is primary
 - The player occupies the viewport below the global header and persistent transport.
 - The initial visualization is the release/feature cover with work and creator context.
 - A horizontal swipe changes visualization. Visible previous/next controls and labeled view buttons provide keyboard and accessibility parity.
-- The second visualization is the spectrogram surface plus audio descriptors. Until a real derived spectral artifact exists, the surface states this explicitly and displays only measured technical descriptors; it must never fabricate spectral data.
+- The second visualization is a real, checksum-bound `ffmpeg` spectrogram plus normalized energy, brightness, motion, gravity and tension descriptors. Generation happens server-side; long recordings are never fully decoded in mobile browser memory.
 - An upward swipe from the bottom opens the catalog drawer; downward swipe closes it. The handle is also a button.
 - Catalog items are large touch targets. Touching the main row loads and plays the asset. Segment rows play only their stored temporal interval.
+- A minimal shortcut rail precedes catalog items. It contains recent/favorite canonical Aby folders and a `+` control; `+` reveals the complete tree derived only from `aby/aud/` and `aby/mov/`, never `ref/`.
 - `Play segment` is also available in the Inspect workflow once a segment exists.
 
 ## Visual system
@@ -28,11 +29,10 @@ This surface is a hyperinstrument, not an administration table. Media is primary
 - Horizontal view gestures use a 56 px threshold; vertical drawer gestures use 48 px.
 - Gesture axes are separated: view gestures occur only on the stage, drawer gestures only on the drawer.
 - Gestures are never the sole control. Every action has a visible button and semantic label.
-- Empty, loading, unauthorized and missing-analysis states use literal language.
+- Errors remain literal, while successful playback avoids redundant status prose already expressed by the title and native transport.
 
 ## Data contract
 
 - Catalog data comes from committed `Work → Recording → Asset` records owned by the authenticated Logto subject.
 - Cover candidates retain their provenance and remain labeled candidates where applicable.
-- Descriptors use stored technical metadata only.
-- Spectrogram data will later be a checksum-bound derived artifact; the first surface does not synthesize or imply analysis that does not exist.
+- Spectrogram and descriptor summaries are stored in `aby.analysis`, linked to the source asset SHA-256 and an idempotent `aby.jobs` record. The image lives in private Wasabi and reaches the browser through a short-lived signed URL.

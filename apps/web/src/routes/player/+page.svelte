@@ -1,18 +1,65 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import type { CatalogItem, CatalogSegment } from '@zztt/aby-domain';
-  import { formatDuration, formatTechnicalFormat } from '$lib/presentation';
+  import type { PageData } from './$types';
+  import { formatDuration } from '$lib/presentation';
   import { currentPlayback, loadPlayback, loadSegmentPlayback } from '$lib/player';
+  import SpectrogramView from '$lib/components/SpectrogramView.svelte';
 
   const views = ['Cover', 'Spectrogram'] as const;
+  let { data }: { data: PageData } = $props();
   let items = $state<CatalogItem[]>([]);
   let selected = $state<CatalogItem | null>(null);
   let viewIndex = $state(0);
   let drawerOpen = $state(false);
   let loading = $state(true);
-  let message = $state('Loading the private catalog…');
+  let message = $state('');
+  let activeFolder = $state<string | null>(null);
+  let favoriteFolders = $state<string[]>([]);
+  let recentFolders = $state<string[]>([]);
+  let folderTreeOpen = $state(false);
   let gestureStart = { x: 0, y: 0 };
   let drawerGestureY = 0;
+  const storageSuffix = $derived(data.user?.id ?? 'anonymous');
+  const folderOptions = $derived.by(() => {
+    const paths: string[] = [];
+    for (const item of items) {
+      const parts = item.asset.objectKey.split('/');
+      if (parts[0] !== 'aby' || !['aud', 'mov'].includes(parts[1] ?? '')) continue;
+      const directory = parts.slice(0, -1);
+      for (let end = 3; end <= directory.length; end += 1) {
+        const path = directory.slice(0, end).join('/');
+        if (!paths.includes(path)) paths.push(path);
+      }
+    }
+    return paths.sort((left, right) => left.localeCompare(right));
+  });
+  const shortcutFolders = $derived([...favoriteFolders, ...recentFolders]
+    .filter((path, index, paths) => paths.indexOf(path) === index && folderOptions.includes(path)).slice(0, 5));
+  const visibleItems = $derived(activeFolder ? items.filter((item) => item.asset.objectKey.startsWith(`${activeFolder}/`)) : items);
+
+  function folderLabel(path: string) {
+    return path.replace(/^aby\//, '');
+  }
+
+  function persistFolders() {
+    localStorage.setItem(`aby.favorite-folders:${storageSuffix}`, JSON.stringify(favoriteFolders));
+    localStorage.setItem(`aby.recent-folders:${storageSuffix}`, JSON.stringify(recentFolders));
+  }
+
+  function selectFolder(path: string | null) {
+    activeFolder = path;
+    folderTreeOpen = false;
+    if (path) recentFolders = [path, ...recentFolders.filter((candidate) => candidate !== path)].slice(0, 5);
+    persistFolders();
+  }
+
+  function toggleFavorite(path: string) {
+    favoriteFolders = favoriteFolders.includes(path)
+      ? favoriteFolders.filter((candidate) => candidate !== path)
+      : [path, ...favoriteFolders];
+    persistFolders();
+  }
 
   onMount(async () => {
     try {
@@ -21,8 +68,22 @@
       if (!response.ok) throw new Error(body.error?.message ?? 'Catalog could not be loaded');
       items = body.items;
       selected = items[0] ?? null;
+      try {
+        const storedFavorites: unknown = JSON.parse(localStorage.getItem(`aby.favorite-folders:${storageSuffix}`) ?? '[]');
+        const storedRecents: unknown = JSON.parse(localStorage.getItem(`aby.recent-folders:${storageSuffix}`) ?? '[]');
+        favoriteFolders = Array.isArray(storedFavorites) ? storedFavorites.filter((value): value is string => typeof value === 'string') : [];
+        recentFolders = Array.isArray(storedRecents) ? storedRecents.filter((value): value is string => typeof value === 'string') : [];
+      } catch {
+        favoriteFolders = [];
+        recentFolders = [];
+      }
+      if (!recentFolders.length && items[0]) {
+        const parts = items[0].asset.objectKey.split('/');
+        const workFolder = parts.slice(0, Math.min(5, parts.length - 1)).join('/');
+        if (workFolder.startsWith('aby/')) recentFolders = [workFolder];
+      }
       drawerOpen = items.length === 0;
-      message = items.length ? `${items.length} playable item${items.length === 1 ? '' : 's'}` : 'No committed assets yet.';
+      message = '';
     } catch (error) {
       message = error instanceof Error ? error.message : 'Catalog could not be loaded';
       drawerOpen = true;
@@ -60,10 +121,10 @@
   async function playItem(item: CatalogItem) {
     selected = item;
     drawerOpen = false;
-    message = `Loading ${item.workTitle}…`;
+    message = '';
     try {
       await loadPlayback(item.asset.id, item.workTitle, item.creator ?? item.recordingTitle);
-      message = `Playing ${item.workTitle}`;
+      message = '';
     } catch (error) {
       message = error instanceof Error ? error.message : 'Playback failed';
     }
@@ -80,7 +141,7 @@
         segment.startTimeMs,
         segment.endTimeMs
       );
-      message = `Playing ${formatDuration(segment.endTimeMs - segment.startTimeMs)} segment`;
+      message = '';
     } catch (error) {
       message = error instanceof Error ? error.message : 'Segment playback failed';
     }
@@ -94,7 +155,7 @@
 
 <main class:transport-active={Boolean($currentPlayback)} class="instrument-shell">
   <section class="instrument-stage" ontouchstart={startViewGesture} ontouchend={endViewGesture} aria-label={`${views[viewIndex]} visualization`}>
-    <div class="instrument-status"><span></span>{message}</div>
+    {#if message}<div class="instrument-status">{message}</div>{/if}
 
     {#if selected}
       {#if viewIndex === 0}
@@ -114,19 +175,7 @@
           </div>
         </div>
       {:else}
-        <div class="spectrogram-view">
-          <div class="spectrogram-empty" aria-label="Spectrogram analysis pending">
-            <span>Derived spectral artifact pending</span>
-            <div class="spectral-grid"></div>
-          </div>
-          <div class="descriptor-strip">
-            <div><small>Length</small><strong>{formatDuration(selected.asset.technicalMetadata.durationMs)}</strong></div>
-            <div><small>Format</small><strong>{formatTechnicalFormat(selected.asset.technicalMetadata)}</strong></div>
-            <div><small>Rate</small><strong>{selected.asset.technicalMetadata.sampleRate ?? '—'} Hz</strong></div>
-            <div><small>Channels</small><strong>{selected.asset.technicalMetadata.channels ?? '—'}</strong></div>
-            <div><small>Bit rate</small><strong>{selected.asset.technicalMetadata.bitRate ? `${Math.round(selected.asset.technicalMetadata.bitRate / 1000)} kb/s` : '—'}</strong></div>
-          </div>
-        </div>
+        <SpectrogramView asset={selected.asset} onplay={() => playItem(selected!)} />
       {/if}
     {:else if loading}
       <div class="instrument-empty">Opening the instrument…</div>
@@ -149,8 +198,25 @@
       <strong>Catalog</strong>
       <small>{items.length} items · {drawerOpen ? 'swipe down to close' : 'swipe up to browse'}</small>
     </button>
+    <div class="folder-shortcuts" aria-label="Canonical Aby folders">
+      <button class:active={activeFolder === null} onclick={() => selectFolder(null)}>All</button>
+      {#each shortcutFolders as folder (folder)}
+        <button class:active={activeFolder === folder} onclick={() => selectFolder(folder)}>{folderLabel(folder)}</button>
+      {/each}
+      <button class="folder-add" class:active={folderTreeOpen} onclick={() => folderTreeOpen = !folderTreeOpen} aria-label="Choose favorite Aby folders">+</button>
+    </div>
+    {#if folderTreeOpen}
+      <div class="folder-tree" aria-label="Aby canonical folder tree">
+        {#each folderOptions as folder (folder)}
+          <div>
+            <button class:active={activeFolder === folder} onclick={() => selectFolder(folder)}>{folderLabel(folder)}</button>
+            <button class="favorite-toggle" class:active={favoriteFolders.includes(folder)} onclick={() => toggleFavorite(folder)} aria-label={`${favoriteFolders.includes(folder) ? 'Remove' : 'Add'} ${folderLabel(folder)} ${favoriteFolders.includes(folder) ? 'from' : 'to'} favorites`}>★</button>
+          </div>
+        {/each}
+      </div>
+    {/if}
     <div class="catalog-items">
-      {#each items as item, index (item.asset.id)}
+      {#each visibleItems as item, index (item.asset.id)}
         <article class:selected={selected?.asset.id === item.asset.id}>
           <button class="catalog-primary" onclick={() => playItem(item)}>
             <span class="catalog-index">{String(index + 1).padStart(2, '0')}</span>
@@ -170,7 +236,7 @@
           {/if}
         </article>
       {:else}
-        <p class="catalog-empty">The catalog is empty. Promotion and canonical commit happen in Inspect.</p>
+        <p class="catalog-empty">{items.length ? 'No items in this Aby folder.' : 'The catalog is empty.'}</p>
       {/each}
     </div>
   </aside>

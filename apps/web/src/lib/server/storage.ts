@@ -1,6 +1,6 @@
-import { CopyObjectCommand, DeleteObjectCommand, GetObjectCommand, HeadObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import { CopyObjectCommand, DeleteObjectCommand, GetObjectCommand, HeadObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
-import { createWriteStream } from 'node:fs';
+import { createReadStream, createWriteStream } from 'node:fs';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import type { Asset } from '@zztt/aby-domain';
@@ -124,6 +124,31 @@ export async function deleteWasabiCanonicalObject(objectKey: string): Promise<vo
     Bucket: config.WASABI_BUCKET!,
     Key: toWasabiKey(key, config.wasabiRootPrefix)
   }));
+}
+
+export async function uploadWasabiArtifact(objectKey: string, localPath: string, contentType: string): Promise<void> {
+  const config = readConfig();
+  const key = assertAbyObjectKey(objectKey, config.storagePrefix);
+  await wasabiClient().send(new PutObjectCommand({
+    Bucket: config.WASABI_BUCKET!,
+    Key: toWasabiKey(key, config.wasabiRootPrefix),
+    Body: createReadStream(localPath),
+    ContentType: contentType,
+    Metadata: { derived: 'true' }
+  }));
+}
+
+export async function artifactUrl(objectKey: string, contentType: string): Promise<{ url: string; expiresAt: string }> {
+  const config = readConfig();
+  const key = assertAbyObjectKey(objectKey, config.storagePrefix);
+  const expiresIn = config.ABY_PRESIGNED_URL_TTL_SECONDS;
+  const url = await getSignedUrl(wasabiClient(), new GetObjectCommand({
+    Bucket: config.WASABI_BUCKET!,
+    Key: toWasabiKey(key, config.wasabiRootPrefix),
+    ResponseContentType: contentType,
+    ResponseContentDisposition: 'inline'
+  }), { expiresIn });
+  return { url, expiresAt: new Date(Date.now() + expiresIn * 1000).toISOString() };
 }
 
 export async function playbackUrl(asset: Asset): Promise<{ url: string; expiresAt: string }> {

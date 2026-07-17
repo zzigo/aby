@@ -4,6 +4,26 @@ import type { Asset, CatalogItem, IngestPreview, Provenance, Segment, SegmentCre
 import { AbyError } from './errors';
 import { readConfig } from './config';
 
+export interface SpectrogramSummary {
+  descriptors: { energy: number; brightness: number; motion: number; gravity: number; tension: number };
+  observationCount: number;
+  width: number;
+  height: number;
+  generatedAt: string;
+}
+
+export interface SpectrogramAnalysis {
+  id: string;
+  assetId: string;
+  sourceAssetChecksum: string;
+  artifactObjectKey: string;
+  tool: string;
+  toolVersion: string;
+  summary: SpectrogramSummary;
+  reviewState: 'candidate' | 'accepted' | 'rejected';
+  createdAt: string;
+}
+
 export interface AbyRepository {
   savePreview(preview: IngestPreview): Promise<IngestPreview>;
   getPreview(ownerId: string, previewId: string): Promise<IngestPreview | null>;
@@ -11,6 +31,8 @@ export interface AbyRepository {
   commitPreview(ownerId: string, previewId: string, workTitle: string, recordingTitle: string): Promise<Asset>;
   listCatalog(ownerId: string): Promise<CatalogItem[]>;
   getAsset(ownerId: string, assetId: string): Promise<Asset | null>;
+  getSpectrogramAnalysis(ownerId: string, assetId: string): Promise<SpectrogramAnalysis | null>;
+  saveSpectrogramAnalysis(ownerId: string, asset: Asset, input: Omit<SpectrogramAnalysis, 'id' | 'assetId' | 'sourceAssetChecksum' | 'createdAt'>): Promise<SpectrogramAnalysis>;
   createSegment(ownerId: string, input: SegmentCreate, provenance: Provenance): Promise<Segment>;
 }
 
@@ -22,6 +44,7 @@ export class MemoryAbyRepository implements AbyRepository {
   readonly #previews = new Map<string, IngestPreview>();
   readonly #assets = new Map<string, Asset>();
   readonly #segments = new Map<string, Segment>();
+  readonly #spectrograms = new Map<string, SpectrogramAnalysis>();
 
   async savePreview(preview: IngestPreview): Promise<IngestPreview> {
     this.#previews.set(preview.id, structuredClone(preview));
@@ -100,6 +123,22 @@ export class MemoryAbyRepository implements AbyRepository {
   async getAsset(ownerId: string, assetId: string): Promise<Asset | null> {
     const asset = this.#assets.get(assetId);
     return asset?.ownerId === ownerId ? structuredClone(asset) : null;
+  }
+
+  async getSpectrogramAnalysis(ownerId: string, assetId: string): Promise<SpectrogramAnalysis | null> {
+    const asset = await this.getAsset(ownerId, assetId);
+    const analysis = this.#spectrograms.get(assetId);
+    return asset && analysis?.sourceAssetChecksum === asset.checksumSha256 ? structuredClone(analysis) : null;
+  }
+
+  async saveSpectrogramAnalysis(ownerId: string, asset: Asset, input: Omit<SpectrogramAnalysis, 'id' | 'assetId' | 'sourceAssetChecksum' | 'createdAt'>): Promise<SpectrogramAnalysis> {
+    if (asset.ownerId !== ownerId) throw new AbyError('asset_not_found', 'Asset not found', 404);
+    const analysis: SpectrogramAnalysis = {
+      id: randomUUID(), assetId: asset.id, sourceAssetChecksum: asset.checksumSha256,
+      ...input, createdAt: new Date().toISOString()
+    };
+    this.#spectrograms.set(asset.id, analysis);
+    return structuredClone(analysis);
   }
 
   async listCatalog(ownerId: string): Promise<CatalogItem[]> {
@@ -365,6 +404,80 @@ export class PostgresAbyRepository implements AbyRepository {
        WHERE a.id=$1 AND a.owner_id=$2`, [assetId, ownerId]
     );
     return result.rows[0] ? mapAsset(result.rows[0]) : null;
+  }
+
+  async getSpectrogramAnalysis(ownerId: string, assetId: string): Promise<SpectrogramAnalysis | null> {
+    const result = await this.#pool.query(
+      `SELECT an.* FROM aby.analysis an
+       JOIN aby.assets a ON a.id=an.asset_id AND a.owner_id=an.owner_id
+       WHERE an.owner_id=$1 AND an.asset_id=$2 AND an.tool='ffmpeg-showspectrumpic'
+         AND an.source_asset_checksum=a.checksum_sha256 AND an.review_state<>'rejected'
+       ORDER BY an.created_at DESC LIMIT 1`,
+      [ownerId, assetId]
+    );
+    const row = result.rows[0];
+    return row?.artifact_object_key ? {
+      id: row.id,
+      assetId: row.asset_id,
+      sourceAssetChecksum: row.source_asset_checksum,
+      artifactObjectKey: row.artifact_object_key,
+      tool: row.tool,
+      toolVersion: row.tool_version,
+      summary: row.summary,
+      reviewState: row.review_state,
+      createdAt: new Date(row.created_at).toISOString()
+    } : null;
+  }
+
+  async saveSpectrogramAnalysis(ownerId: string, asset: Asset, input: Omit<SpectrogramAnalysis, 'id' | 'assetId' | 'sourceAssetChecksum' | 'createdAt'>): Promise<SpectrogramAnalysis> {
+    if (asset.ownerId !== ownerId) throw new AbyError('asset_not_found', 'Asset not found', 404);
+    const client = await this.#pool.connect();
+    const jobId = randomUUID();
+    const idempotencyKey = `spectrogram:v1:${ownerId}:${asset.id}:${asset.checksumSha256}`;
+    try {
+      await client.query('BEGIN');
+      const job = await client.query(
+        `INSERT INTO aby.jobs
+         (id,owner_id,type,idempotency_key,state,analysis_requested,payload,result,attempts,started_at,finished_at)
+         VALUES($1,$2,'asset.analyze',$3,'succeeded',true,$4,$5,1,now(),now())
+         ON CONFLICT(idempotency_key) DO UPDATE SET
+           state='succeeded',result=excluded.result,attempts=aby.jobs.attempts+1,finished_at=now(),updated_at=now()
+         RETURNING id`,
+        [jobId, ownerId, idempotencyKey, { assetId: asset.id, checksum: asset.checksumSha256, analysis: 'spectrogram-v1' }, { artifactObjectKey: input.artifactObjectKey }]
+      );
+      const existing = await client.query(
+        'SELECT id FROM aby.analysis WHERE owner_id=$1 AND asset_id=$2 AND job_id=$3 LIMIT 1',
+        [ownerId, asset.id, job.rows[0].id]
+      );
+      const analysisId = existing.rows[0]?.id ?? randomUUID();
+      const saved = await client.query(
+        `INSERT INTO aby.analysis
+         (id,owner_id,asset_id,job_id,tool,tool_version,parameters,source_asset_checksum,summary,artifact_object_key,confidence,review_state)
+         VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,1,$11)
+         ON CONFLICT(id) DO UPDATE SET
+           tool=excluded.tool,tool_version=excluded.tool_version,parameters=excluded.parameters,
+           source_asset_checksum=excluded.source_asset_checksum,summary=excluded.summary,
+           artifact_object_key=excluded.artifact_object_key,confidence=excluded.confidence,
+           review_state=excluded.review_state
+         RETURNING *`,
+        [analysisId, ownerId, asset.id, job.rows[0].id, input.tool, input.toolVersion,
+          { width: input.summary.width, height: input.summary.height, descriptorVersion: 1 },
+          asset.checksumSha256, input.summary, input.artifactObjectKey, input.reviewState]
+      );
+      const row = saved.rows[0];
+      if (!row) throw new AbyError('spectrogram_not_saved', 'Spectrogram analysis could not be saved', 500);
+      await client.query('COMMIT');
+      return {
+        id: row.id, assetId: row.asset_id, sourceAssetChecksum: row.source_asset_checksum,
+        artifactObjectKey: row.artifact_object_key, tool: row.tool, toolVersion: row.tool_version,
+        summary: row.summary, reviewState: row.review_state, createdAt: new Date(row.created_at).toISOString()
+      };
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
   }
 
   async listCatalog(ownerId: string): Promise<CatalogItem[]> {

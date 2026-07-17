@@ -35,7 +35,6 @@
 {#if $currentPlayback}
   <aside class:instrument-mode={page.url.pathname.startsWith('/player')} class="persistent-player" aria-label="Persistent media player">
     <div class="player-context">
-      <span class="eyebrow">Now listening</span>
       <strong>{$currentPlayback.title}</strong>
       <small>{$currentPlayback.subtitle}</small>
     </div>
