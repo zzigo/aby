@@ -1,0 +1,35 @@
+{
+  "name": "aby",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "bun@1.3.14",
+  "workspaces": [
+    "apps/*",
+    "packages/*",
+    "services/*"
+  ],
+  "scripts": {
+    "dev": "bun --filter @aby/web dev",
+    "build": "bun run build:packages && bun --filter @aby/web build",
+    "build:packages": "bun --filter @zztt/aby-domain build && bun --filter @zztt/aby-sdk build && bun --filter @zztt/aby-media-ingest build",
+    "typecheck": "bun run build:packages && bun --filter @aby/web check",
+    "lint": "eslint . --max-warnings=0",
+    "test": "bun test",
+    "validate": "bun run lint && bun run typecheck && bun run test && bun run build",
+    "db:migrate": "bun scripts/migrate.ts"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.2",
+    "@types/bun": "^1.3.9",
+    "eslint": "^9.39.2",
+    "eslint-plugin-svelte": "^3.14.0",
+    "globals": "^17.3.0",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.53.1"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}
+
