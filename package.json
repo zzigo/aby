@@ -17,7 +17,7 @@
     "lint": "eslint . --max-warnings=0",
     "test": "bun test",
     "validate": "bun run lint && bun run typecheck && bun run test && bun run build",
-    "db:migrate": "bun scripts/migrate.ts",
+    "db:migrate": "bun --filter @aby/web db:migrate",
     "tunnel:vps": "bash scripts/tunnel-vps.sh"
   },
   "devDependencies": {
