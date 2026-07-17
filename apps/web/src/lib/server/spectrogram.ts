@@ -107,8 +107,9 @@ export async function generateSpectrogramAnalysis(
     await downloadWasabiObject(asset.objectKey, inputPath);
     const filter = `showspectrumpic=s=${WIDTH}x${HEIGHT}:legend=disabled:color=green:scale=log:fscale=log:drange=100`;
     await runProcess(config.FFMPEG_PATH, [
-      '-v', 'error', '-y', '-i', inputPath, '-map', '0:a:0', '-lavfi', filter,
-      '-frames:v', '1', outputPath
+      '-v', 'error', '-y', '-i', inputPath,
+      '-filter_complex', `[0:a:0]${filter}[spectrogram]`, '-map', '[spectrogram]',
+      '-c:v', 'png', '-frames:v', '1', outputPath
     ], config.FFMPEG_ANALYSIS_TIMEOUT_MS);
     const observations = await readObservations(config.FFMPEG_PATH, inputPath, config.FFMPEG_ANALYSIS_TIMEOUT_MS);
     const artifactObjectKey = spectrogramArtifactKey(asset);
