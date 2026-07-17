@@ -55,4 +55,52 @@ describe('preview-before-write repository flow', () => {
     const asset = await repository.commitPreview('owner-a', preview.id, 'Work', 'Recording');
     expect(asset.objectKey).toBe(source.candidateMetadata.canonicalObjectKey);
   });
+
+  test('reuses a canonical asset for the same storage identity and checksum, but rejects changed content', async () => {
+    const repository = new MemoryAbyRepository();
+    const initial = fixturePreview();
+    initial.provider = 'wasabi';
+    initial.bucket = 'private';
+    const firstPreview = await repository.savePreview(initial);
+    const firstAsset = await repository.commitPreview('owner-a', firstPreview.id, 'Work', 'Recording');
+
+    const repeatedPreview = fixturePreview();
+    repeatedPreview.ownerId = firstPreview.ownerId;
+    repeatedPreview.provider = firstPreview.provider;
+    repeatedPreview.bucket = firstPreview.bucket;
+    repeatedPreview.objectKey = firstPreview.objectKey;
+    repeatedPreview.checksumSha256 = firstPreview.checksumSha256;
+    const savedRepeat = await repository.savePreview(repeatedPreview);
+    const repeatedAsset = await repository.commitPreview('owner-a', savedRepeat.id, 'Work', 'Recording');
+    expect(repeatedAsset.id).toBe(firstAsset.id);
+
+    for (const [workTitle, recordingTitle] of [
+      ['Different work', 'Recording'],
+      ['Work', 'Different recording']
+    ]) {
+      const metadataConflict = fixturePreview();
+      metadataConflict.ownerId = firstPreview.ownerId;
+      metadataConflict.provider = firstPreview.provider;
+      metadataConflict.bucket = firstPreview.bucket;
+      metadataConflict.objectKey = firstPreview.objectKey;
+      metadataConflict.checksumSha256 = firstPreview.checksumSha256;
+      const savedMetadataConflict = await repository.savePreview(metadataConflict);
+      expect(repository.commitPreview('owner-a', savedMetadataConflict.id, workTitle, recordingTitle)).rejects.toMatchObject({
+        code: 'canonical_metadata_conflict',
+        status: 409
+      });
+    }
+
+    const conflictingPreview = fixturePreview();
+    conflictingPreview.ownerId = firstPreview.ownerId;
+    conflictingPreview.provider = firstPreview.provider;
+    conflictingPreview.bucket = firstPreview.bucket;
+    conflictingPreview.objectKey = firstPreview.objectKey;
+    conflictingPreview.checksumSha256 = 'b'.repeat(64);
+    const savedConflict = await repository.savePreview(conflictingPreview);
+    expect(repository.commitPreview('owner-a', savedConflict.id, 'Work', 'Recording')).rejects.toMatchObject({
+      code: 'canonical_asset_conflict',
+      status: 409
+    });
+  });
 });

@@ -61,11 +61,28 @@ export class MemoryAbyRepository implements AbyRepository {
   async commitPreview(ownerId: string, previewId: string, workTitle: string, recordingTitle: string): Promise<Asset> {
     const preview = this.#previews.get(previewId);
     if (!preview || preview.ownerId !== ownerId) throw new AbyError('preview_not_found', 'Ingest preview not found', 404);
+    if (preview.status === 'rejected') throw new AbyError('preview_not_committable', 'Rejected previews cannot be committed', 409);
     if (preview.candidateMetadata.canonicalObjectKey && preview.candidateMetadata.canonicalObjectKey !== preview.objectKey) {
       throw new AbyError('promotion_required', 'The source must be copied, verified and promoted before canonical commit', 409);
     }
-    const existing = [...this.#assets.values()].find((value) => value.provenance.jobId === preview.id);
-    if (existing) return structuredClone(existing);
+    const existing = [...this.#assets.values()].find((value) =>
+      value.provenance.jobId === preview.id || (
+        value.ownerId === ownerId &&
+        value.provider === preview.provider &&
+        value.bucket === preview.bucket &&
+        value.objectKey === preview.objectKey
+      )
+    );
+    if (existing) {
+      if (existing.checksumSha256 !== preview.checksumSha256) {
+        throw new AbyError('canonical_asset_conflict', 'Canonical object key is already registered with a different checksum', 409);
+      }
+      if (existing.canonicalMetadata.title !== workTitle || existing.canonicalMetadata.recordingTitle !== recordingTitle) {
+        throw new AbyError('canonical_metadata_conflict', 'Canonical asset already exists with different work or recording metadata', 409);
+      }
+      this.#previews.set(preview.id, { ...preview, status: 'committed' });
+      return structuredClone(existing);
+    }
     const now = new Date().toISOString();
     const asset: Asset = {
       id: randomUUID(), ownerId, workId: randomUUID(), recordingId: randomUUID(), provider: preview.provider,
@@ -240,15 +257,66 @@ export class PostgresAbyRepository implements AbyRepository {
       const preview = result.rows[0];
       if (!preview) throw new AbyError('preview_not_found', 'Ingest preview not found', 404);
       if (preview.status === 'committed') {
+        if (!preview.committed_asset_id) {
+          throw new AbyError('committed_asset_missing', 'Committed preview no longer points to an asset', 409);
+        }
         const existing = await client.query(
           `SELECT a.*, r.work_id FROM aby.assets a JOIN aby.recordings r ON r.id=a.recording_id
            WHERE a.id=$1 AND a.owner_id=$2`, [preview.committed_asset_id, ownerId]
         );
+        if (!existing.rows[0]) throw new AbyError('committed_asset_missing', 'Committed preview asset no longer exists', 409);
         await client.query('COMMIT');
         return mapAsset(existing.rows[0]);
       }
+      if (preview.status !== 'candidate') throw new AbyError('preview_not_committable', 'Only candidate previews can be committed', 409);
       if (preview.candidate_metadata.canonicalObjectKey && preview.candidate_metadata.canonicalObjectKey !== preview.object_key) {
         throw new AbyError('promotion_required', 'The source must be copied, verified and promoted before canonical commit', 409);
+      }
+      const lockKeys = [
+        JSON.stringify(['asset-location', ownerId, preview.provider, preview.bucket ?? null, preview.object_key]),
+        JSON.stringify(['asset-checksum', ownerId, preview.checksum_sha256])
+      ].sort();
+      for (const lockKey of lockKeys) {
+        await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))', [lockKey]);
+      }
+      const duplicate = await client.query(
+        `SELECT a.*,r.work_id,r.title AS existing_recording_title,w.title AS existing_work_title FROM aby.assets a
+         JOIN aby.recordings r ON r.id=a.recording_id
+         JOIN aby.works w ON w.id=r.work_id
+         WHERE a.owner_id=$1 AND a.provider=$2 AND a.bucket IS NOT DISTINCT FROM $3 AND a.object_key=$4
+         FOR UPDATE`,
+        [ownerId, preview.provider, preview.bucket, preview.object_key]
+      );
+      if (duplicate.rows[0]) {
+        const existing = duplicate.rows[0];
+        if (existing.state !== 'active') {
+          throw new AbyError('canonical_asset_inactive', 'Canonical object is already registered but is not active', 409);
+        }
+        if (existing.checksum_sha256 !== preview.checksum_sha256) {
+          throw new AbyError('canonical_asset_conflict', 'Canonical object key is already registered with a different checksum', 409);
+        }
+        if (existing.existing_work_title !== workTitle || existing.existing_recording_title !== recordingTitle) {
+          throw new AbyError('canonical_metadata_conflict', 'Canonical asset already exists with different work or recording metadata', 409);
+        }
+        await client.query(
+          "UPDATE aby.ingest_candidates SET status='committed',committed_asset_id=$1,updated_at=now() WHERE id=$2",
+          [existing.id, previewId]
+        );
+        await client.query('COMMIT');
+        return mapAsset(existing);
+      }
+      const checksumDuplicate = await client.query(
+        `SELECT id,provider,bucket,object_key,state FROM aby.assets
+         WHERE owner_id=$1 AND checksum_sha256=$2
+         FOR UPDATE`,
+        [ownerId, preview.checksum_sha256]
+      );
+      if (checksumDuplicate.rows[0]) {
+        throw new AbyError(
+          'canonical_checksum_conflict',
+          'These bytes are already registered under another canonical object key; explicit reconciliation is required',
+          409
+        );
       }
       const now = new Date().toISOString();
       const workId = randomUUID();
