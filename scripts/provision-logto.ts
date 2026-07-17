@@ -122,6 +122,15 @@ if (!application) {
 if (application.type !== 'Traditional') throw new Error('Existing Aby Logto application is not a Traditional app');
 const { secret } = await applicationSecret(application.id);
 let environment = await readFile(envPath, 'utf8');
+environment = setEnv(environment, 'ABY_STORAGE_PREFIX', 'aby/');
+environment = setEnv(environment, 'ABY_AUDIO_PREFIX', 'aby/aud/');
+environment = setEnv(environment, 'ABY_VIDEO_PREFIX', 'aby/mov/');
+environment = setEnv(environment, 'ABY_SOURCE_AUDIO_PREFIX', 'ref/');
+environment = setEnv(environment, 'ABY_SOURCE_VIDEO_PREFIX', 'mov/');
+environment = setEnv(environment, 'ABY_INGEST_MAX_SOURCE_BYTES', '1073741824');
+environment = setEnv(environment, 'MUSICBRAINZ_BASE_URL', 'https://musicbrainz.org/ws/2');
+environment = setEnv(environment, 'COVER_ART_ARCHIVE_BASE_URL', 'https://coverartarchive.org');
+environment = setEnv(environment, 'ABY_EXTERNAL_METADATA_CONTACT', 'https://aby.zztt.org');
 environment = setEnv(environment, 'LOGTO_ISSUER_URL', `${endpoint}/oidc`);
 environment = setEnv(environment, 'LOGTO_CLIENT_ID', application.id);
 environment = setEnv(environment, 'LOGTO_CLIENT_SECRET', secret);
