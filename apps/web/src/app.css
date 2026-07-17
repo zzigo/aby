@@ -92,7 +92,7 @@ audio { width: 100%; height: 42px; }
 .view-arrow { position: absolute; top: 50%; width: 48px; height: 64px; padding: 0; display: grid; place-items: center; background: #171817aa; color: #fff; border-color: #383a36; font-size: 20px; }
 .view-arrow.previous { left: 12px; }
 .view-arrow.next { right: 12px; }
-.view-switcher { position: absolute; left: 50%; bottom: 28px; transform: translateX(-50%); display: flex; gap: 4px; padding: 4px; border: 1px solid var(--line); background: #101110cc; }
+.view-switcher { position: absolute; left: 50%; bottom: 84px; transform: translateX(-50%); display: flex; gap: 4px; padding: 4px; border: 1px solid var(--line); background: #101110cc; }
 .view-switcher button { min-height: 40px; padding: 8px 13px; background: transparent; color: var(--muted); border: 0; text-transform: uppercase; letter-spacing: .1em; font-size: 9px; }
 .view-switcher button.active { background: #252722; color: var(--signal); }
 .spectrogram-view { width: min(1120px, 84vw); display: grid; gap: 24px; }
@@ -152,7 +152,7 @@ audio { width: 100%; height: 42px; }
   .view-arrow { top: 42%; width: 44px; height: 54px; }
   .view-arrow.previous { left: 4px; }
   .view-arrow.next { right: 4px; }
-  .view-switcher { bottom: 16px; }
+  .view-switcher { bottom: 80px; }
   .spectrogram-view { width: 88vw; }
   .spectrogram-empty { height: 48vh; }
   .descriptor-strip { grid-template-columns: repeat(2,1fr); max-height: 170px; overflow-y: auto; }
