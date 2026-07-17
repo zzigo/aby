@@ -156,18 +156,12 @@
       <div style="position: absolute; left: 0; top: 0; bottom: 0; width: {progressPercent}%; background: rgba(198, 255, 82, 0.16); pointer-events: none;"></div>
       
       <!-- Full Height Cursor Line -->
-      <div style="position: absolute; left: {progressPercent}%; top: 0; bottom: 0; width: 2px; background: var(--signal); pointer-events: none; z-index: 5; display: flex; flex-direction: column; justify-content: space-between; align-items: center; box-shadow: 0 0 10px var(--signal);">
-        <!-- Attached current/left time bubble -->
-        <span style="font: 9px ui-monospace, monospace; color: #101110; background: var(--signal); padding: 2px 5px; border-radius: 2px; transform: translate(-50%, 6px); font-weight: bold; white-space: nowrap; box-shadow: 0 2px 8px rgba(0,0,0,0.5);">
-          {formatDuration(currentTimeMs)} / -{formatDuration(Math.max(0, durationMs - currentTimeMs))}
-        </span>
-        <span style="width: 6px; height: 6px; border-radius: 50%; background: var(--signal); transform: translateY(-4px);"></span>
-      </div>
+      <div style="position: absolute; left: {progressPercent}%; top: 0; bottom: 0; width: 2px; background: var(--signal); pointer-events: none; z-index: 5; box-shadow: 0 0 10px var(--signal);"></div>
     </div>
 
     <!-- Overprinted titles and Controls (pointer-events none except interactive controls) -->
     <div style="position: absolute; inset: 0; pointer-events: none; display: flex; align-items: center; justify-content: space-between; padding: 0 24px; z-index: 2;">
-      <div style="display: flex; flex-direction: column; gap: 2px; min-width: 0;">
+      <div style="display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1;">
         <strong style="font-family: Georgia, serif; font-size: 13px; font-style: italic; font-weight: normal; color: #fff; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-shadow: 0 1px 4px #000;">
           {$currentPlayback.title}
         </strong>
@@ -176,13 +170,19 @@
         </small>
       </div>
 
-      <button 
-        onclick={togglePlay}
-        style="pointer-events: auto; background: rgba(16, 17, 16, 0.7); border: 1px solid var(--line); border-radius: 3px; padding: 6px 14px; color: #fff; cursor: pointer; font: 10px ui-monospace, monospace; letter-spacing: 0.08em; font-weight: bold; z-index: 10; transition: border-color 0.2s;"
-        aria-label={isPlaying ? 'Pause' : 'Play'}
-      >
-        {isPlaying ? 'PAUSE' : 'PLAY'}
-      </button>
+      <div style="display: flex; align-items: center; gap: 24px; pointer-events: auto;">
+        <button 
+          onclick={togglePlay}
+          style="background: rgba(16, 17, 16, 0.7); border: 1px solid var(--line); border-radius: 3px; padding: 6px 14px; color: #fff; cursor: pointer; font: 10px ui-monospace, monospace; letter-spacing: 0.08em; font-weight: bold; z-index: 10; transition: border-color 0.2s;"
+          aria-label={isPlaying ? 'Pause' : 'Play'}
+        >
+          {isPlaying ? 'PAUSE' : 'PLAY'}
+        </button>
+
+        <span style="font-family: ui-monospace, monospace; font-size: 2.2rem; line-height: 1; color: var(--signal); font-weight: 300; letter-spacing: -0.05em; padding-left: 12px;">
+          {formatDuration(currentTimeMs)} / -{formatDuration(Math.max(0, durationMs - currentTimeMs))}
+        </span>
+      </div>
     </div>
   </aside>
 {/if}

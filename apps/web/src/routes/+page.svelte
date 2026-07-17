@@ -85,6 +85,75 @@
     }
   }
 
+  let surfSources = $state<Array<{
+    objectKey: string;
+    mediaKind: string;
+    collectionCode: string;
+    entitySlug: string;
+    creatorDisplay: string;
+    workTitle: string;
+    recordingTitle: string;
+  }>>([]);
+  let showSurfList = $state(false);
+  let loadingSurf = $state(false);
+  let surfQuery = $state('');
+
+  const filteredSurfSources = $derived(
+    surfQuery.trim() === ''
+      ? surfSources
+      : surfSources.filter((s) => 
+          s.objectKey.toLowerCase().includes(surfQuery.toLowerCase()) ||
+          s.creatorDisplay.toLowerCase().includes(surfQuery.toLowerCase()) ||
+          s.workTitle.toLowerCase().includes(surfQuery.toLowerCase())
+        )
+  );
+
+  async function toggleSurf() {
+    showSurfList = !showSurfList;
+    if (showSurfList && surfSources.length === 0) {
+      loadingSurf = true;
+      try {
+        const response = await fetch('/api/ingest/sources');
+        const body = await response.json();
+        if (response.ok) {
+          surfSources = body.sources || [];
+        }
+      } catch (error) {
+        console.error('Failed to load surf sources:', error);
+      } finally {
+        loadingSurf = false;
+      }
+    }
+  }
+
+  async function selectSurfSource(selectedSource: typeof surfSources[0]) {
+    busy = true;
+    status = `Inspecting: ${selectedSource.objectKey}...`;
+    showSurfList = false;
+    try {
+      const result = await request('/api/ingest/preview', {
+        sourceObjectKey: selectedSource.objectKey,
+        mediaKind: selectedSource.mediaKind,
+        collectionCode: selectedSource.collectionCode,
+        entitySlug: selectedSource.entitySlug,
+        creatorDisplay: selectedSource.creatorDisplay,
+        workTitle: selectedSource.workTitle,
+        recordingTitle: selectedSource.recordingTitle,
+        analyze: false
+      });
+      preview = result.preview;
+      workTitle = preview!.candidateMetadata.title;
+      recordingTitle = preview!.candidateMetadata.recordingTitle;
+      asset = null;
+      segment = null;
+      status = `Inspected: ${preview!.objectKey}. Real candidate ready.`;
+    } catch (error) {
+      status = error instanceof Error ? error.message : 'Inspection failed';
+    } finally {
+      busy = false;
+    }
+  }
+
   async function commitCandidate() {
     if (!preview) return;
     busy = true;
@@ -190,7 +259,43 @@
       <header><span>01</span><h2>Inspect</h2></header>
       <p>{data.user ? 'Scan legacy source pools and pick a random candidate to adopt.' : 'Authentication uses the same Logto identity as Seshat and Musiki.'}</p>
       {#if data.user}
-        <button class="primary" onclick={surpriseMe} disabled={busy}>Surprise me!</button>
+        <div style="display: flex; gap: 8px; margin-top: 8px;">
+          <button class="primary" onclick={surpriseMe} disabled={busy} style="flex: 1;">Surprise me!</button>
+          <button class="secondary" onclick={toggleSurf} disabled={busy} style="flex: 1;">Surf sources</button>
+        </div>
+
+        {#if showSurfList}
+          <div style="margin-top: 12px; border: 1px solid var(--line); padding: 12px; background: #131412; max-height: 280px; display: flex; flex-direction: column; gap: 8px; overflow: hidden; z-index: 10;">
+            <input 
+              type="text" 
+              bind:value={surfQuery} 
+              placeholder="Filter by name, creator, or path..." 
+              style="width: 100%; font-size: 11px; padding: 8px; background: #0c0d0c; border: 1px solid var(--line); color: #fff; font-family: ui-monospace, monospace; box-sizing: border-box;"
+            />
+            
+            {#if loadingSurf}
+              <div style="color: var(--muted); font-size: 11px; font-family: ui-monospace, monospace; padding: 8px 0;">Scanning Wasabi...</div>
+            {:else if filteredSurfSources.length === 0}
+              <div style="color: var(--muted); font-size: 11px; font-family: ui-monospace, monospace; padding: 8px 0;">No matching sources found.</div>
+            {:else}
+              <div style="overflow-y: auto; flex: 1; display: flex; flex-direction: column; gap: 4px; padding-right: 4px;">
+                {#each filteredSurfSources as src (src.objectKey)}
+                  <button 
+                    onclick={() => selectSurfSource(src)}
+                    class="surf-item-btn"
+                  >
+                    <span style="font-size: 10px; color: var(--signal); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; width: 100%;">
+                      {src.creatorDisplay} — {src.workTitle}
+                    </span>
+                    <span style="font-size: 9px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; width: 100%; direction: rtl; text-align: left;">
+                      {src.objectKey}
+                    </span>
+                  </button>
+                {/each}
+              </div>
+            {/if}
+          </div>
+        {/if}
       {:else}
         <button class="secondary" disabled>Sign in first</button>
       {/if}
@@ -261,10 +366,42 @@
           </div>
         {/if}
         {#if preview.candidateMetadata.imageCandidates?.[0]}
-          <div><dt>Feature image</dt><dd><img class="feature-candidate" src={preview.candidateMetadata.imageCandidates[0].url} alt="Candidate feature art" /><small>{preview.candidateMetadata.imageCandidates[0].exactRelease ? 'Exact release cover' : 'Release-group fallback; requires confirmation'}</small></dd></div>
+          <div>
+            <dt>Feature image</dt>
+            <dd>
+              <img class="feature-candidate" src={preview.candidateMetadata.imageCandidates[0].url} alt="Candidate feature art" />
+              <small style="display: block; margin-top: 4px;">
+                {preview.candidateMetadata.imageCandidates[0].authority === 'wikidata' 
+                  ? 'Wikidata author portrait fallback' 
+                  : (preview.candidateMetadata.imageCandidates[0].exactRelease ? 'Exact release cover' : 'Release-group fallback; requires confirmation')}
+              </small>
+            </dd>
+          </div>
         {/if}
         {#if segment}<div><dt>Segment</dt><dd>{segment.startTimeMs}–{segment.endTimeMs} ms · logical interval</dd></div>{/if}
       </dl>
     {/if}
   </section>
 </main>
+
+<style>
+  .surf-item-btn {
+    text-align: left;
+    background: none;
+    border: 0;
+    padding: 8px;
+    cursor: pointer;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    border-bottom: 1px dashed #30322f;
+    width: 100%;
+    font-family: ui-monospace, monospace;
+    box-sizing: border-box;
+    transition: background 0.15s;
+  }
+  .surf-item-btn:hover, .surf-item-btn:focus {
+    background-color: rgba(198, 255, 82, 0.08);
+    outline: none;
+  }
+</style>

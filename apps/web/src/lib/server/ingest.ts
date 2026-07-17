@@ -119,7 +119,17 @@ export async function inspectWasabiSource(
         sourceRelease: identification.cover.sourceRelease,
         fallback: identification.cover.exactRelease ? 'exact-release' : 'release-group'
       }
-    }] : [];
+    }] : (wikidata?.imageUrl ? [{
+      authority: 'wikidata',
+      url: wikidata.imageUrl,
+      kind: 'feature' as const,
+      exactRelease: false,
+      sourceId: wikidata.qid,
+      provenance: {
+        wikidataQid: wikidata.qid,
+        source: 'wikidata-image-fallback'
+      }
+    }] : []);
     const preview: IngestPreview = {
       id: randomUUID(),
       ownerId,

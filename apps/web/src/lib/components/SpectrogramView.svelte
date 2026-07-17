@@ -132,7 +132,7 @@
     role="region"
     aria-label="Editor de segmento espectrograma"
   >
-    <button class="spectrogram-canvas" onclick={onplay} style="width: 100%; height: 100%; border: 0; padding: 0; background: #090a09; display: block; overflow: hidden; position: relative;" aria-label={`Play ${asset.canonicalMetadata.title} from spectrogram view`}>
+    <button class="spectrogram-canvas" onclick={onplay} style="width: 100%; height: calc(100% - 32px); border: 0; padding: 0; background: #090a09; display: block; overflow: hidden; position: relative;" aria-label={`Play ${asset.canonicalMetadata.title} from spectrogram view`}>
       {#if payload}
         <img src={payload.url} alt={`Spectrogram for ${asset.canonicalMetadata.title}`} style="width: 100%; height: 100%; object-fit: fill; display: block; filter: saturate(.7) contrast(1.18);" />
       {:else}
@@ -143,42 +143,57 @@
     </button>
 
     {#if payload}
-      <!-- Selection Highlight Overlay -->
-      <div 
-        class="selection-highlight" 
-        style="position: absolute; top: 0; bottom: 0; left: {leftPercent}%; width: {rightPercent - leftPercent}%; background: rgba(198, 255, 82, 0.15); border-left: 2px solid var(--signal); border-right: 2px solid var(--signal); pointer-events: none; z-index: 5;"
-      ></div>
+      <!-- Selection Track Container -->
+      <div class="selection-track" style="position: absolute; bottom: 0; left: 0; right: 0; height: 32px; background: #131412; border-top: 1px solid var(--line); overflow: hidden; display: flex; align-items: center;">
+        <!-- Selection Highlight Overlay inside Track -->
+        <div 
+          class="selection-highlight" 
+          style="position: absolute; top: 0; bottom: 0; left: {leftPercent}%; width: {rightPercent - leftPercent}%; background: rgba(198, 255, 82, 0.22); border-left: 1px solid var(--signal); border-right: 1px solid var(--signal); pointer-events: none;"
+        ></div>
 
-      <!-- Drag Handles -->
-      <div 
-        class="drag-handle left-handle" 
-        onpointerdown={(e) => startDrag(e, 'left')}
-        onpointerup={endDrag}
-        onpointercancel={endDrag}
-        style="position: absolute; left: calc({leftPercent}% - 12px); top: 0; bottom: 0; width: 24px; cursor: col-resize; z-index: 10; display: grid; place-items: center;"
-        role="slider"
-        aria-label="Ajustar inicio del segmento"
-        aria-valuemin="0"
-        aria-valuemax={editEndMs}
-        aria-valuenow={editStartMs}
-        tabindex="0"
-      >
-        <span style="width: 4px; height: 40px; border-radius: 2px; background: var(--signal); box-shadow: 0 0 8px var(--signal);"></span>
-      </div>
-      <div 
-        class="drag-handle right-handle" 
-        onpointerdown={(e) => startDrag(e, 'right')}
-        onpointerup={endDrag}
-        onpointercancel={endDrag}
-        style="position: absolute; left: calc({rightPercent}% - 12px); top: 0; bottom: 0; width: 24px; cursor: col-resize; z-index: 10; display: grid; place-items: center;"
-        role="slider"
-        aria-label="Ajustar fin del segmento"
-        aria-valuemin={editStartMs}
-        aria-valuemax={durationMs}
-        aria-valuenow={editEndMs}
-        tabindex="0"
-      >
-        <span style="width: 4px; height: 40px; border-radius: 2px; background: var(--signal); box-shadow: 0 0 8px var(--signal);"></span>
+        <!-- Time Annotations inside Track -->
+        <span style="position: absolute; left: calc({leftPercent}% + 14px); bottom: 10px; font: 8px ui-monospace, monospace; color: var(--muted); pointer-events: none; white-space: nowrap;">
+          {formatDuration(editStartMs)}
+        </span>
+        <span style="position: absolute; left: calc({rightPercent}% - 42px); bottom: 10px; font: 8px ui-monospace, monospace; color: var(--muted); pointer-events: none; white-space: nowrap;">
+          {formatDuration(editEndMs)}
+        </span>
+
+        <!-- Drag Handles (Triangles) -->
+        <div 
+          class="drag-handle left-handle" 
+          onpointerdown={(e) => startDrag(e, 'left')}
+          onpointerup={endDrag}
+          onpointercancel={endDrag}
+          style="position: absolute; left: calc({leftPercent}% - 12px); bottom: 0; height: 32px; width: 24px; cursor: col-resize; z-index: 10; display: flex; flex-direction: column; justify-content: flex-end; align-items: center;"
+          role="slider"
+          aria-label="Ajustar inicio del segmento"
+          aria-valuemin="0"
+          aria-valuemax={editEndMs}
+          aria-valuenow={editStartMs}
+          tabindex="0"
+        >
+          <svg viewBox="0 0 10 10" style="width: 10px; height: 10px; fill: var(--signal); margin-bottom: 2px; filter: drop-shadow(0 0 2px var(--signal));">
+            <polygon points="5,0 0,10 10,10" />
+          </svg>
+        </div>
+        <div 
+          class="drag-handle right-handle" 
+          onpointerdown={(e) => startDrag(e, 'right')}
+          onpointerup={endDrag}
+          onpointercancel={endDrag}
+          style="position: absolute; left: calc({rightPercent}% - 12px); bottom: 0; height: 32px; width: 24px; cursor: col-resize; z-index: 10; display: flex; flex-direction: column; justify-content: flex-end; align-items: center;"
+          role="slider"
+          aria-label="Ajustar fin del segmento"
+          aria-valuemin={editStartMs}
+          aria-valuemax={durationMs}
+          aria-valuenow={editEndMs}
+          tabindex="0"
+        >
+          <svg viewBox="0 0 10 10" style="width: 10px; height: 10px; fill: var(--signal); margin-bottom: 2px; filter: drop-shadow(0 0 2px var(--signal));">
+            <polygon points="5,0 0,10 10,10" />
+          </svg>
+        </div>
       </div>
     {/if}
   </div>
