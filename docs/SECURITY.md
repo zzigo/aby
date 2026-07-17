@@ -2,7 +2,7 @@
 
 - Secrets are accepted only through environment variables and are never returned by health/config endpoints.
 - Production requires PostgreSQL, Wasabi and a dedicated Logto client; demo mode is rejected when `NODE_ENV=production`.
-- Canonical playback keys must remain below `aby/`; discovery keys are separately restricted to the legacy `ref/` and `mov/` roots. Traversal and unrelated prefixes are rejected.
+- Canonical logical playback keys must remain below `aby/`; discovery keys are separately restricted to the legacy `ref/` and `mov/` roots. Traversal and unrelated prefixes are rejected, then the storage adapter prepends only the configured Wasabi root prefix.
 - Playback URLs are short-lived and issued only after asset ownership checks.
 - SQL uses parameterized queries and owner-scoped reads. Aby migrations never address Seshat or Musiki schemas.
 - Request logs contain trace IDs and structured error codes, with credential-like fields redacted.

@@ -10,6 +10,7 @@ const EnvironmentSchema = z.object({
   WASABI_ENDPOINT: optionalText,
   WASABI_REGION: optionalText,
   WASABI_BUCKET: optionalText,
+  WASABI_ROOT_PREFIX: z.string().trim().default(''),
   WASABI_ACCESS_KEY_ID: optionalText,
   WASABI_SECRET_ACCESS_KEY: optionalText,
   ABY_STORAGE_PREFIX: z.string().trim().default('aby/'),
@@ -38,6 +39,10 @@ export function readConfig(environment: NodeJS.ProcessEnv = process.env) {
   const demoMode = env.ABY_DEMO_MODE ? env.ABY_DEMO_MODE === 'true' : !production;
   if (production && demoMode) throw new Error('ABY_DEMO_MODE cannot be enabled in production');
   const normalizePrefix = (value: string) => value.replaceAll('\\', '/').replace(/^\/+/, '').replace(/\/+$/, '') + '/';
+  const wasabiRootPrefix = env.WASABI_ROOT_PREFIX ? normalizePrefix(env.WASABI_ROOT_PREFIX) : '';
+  if (wasabiRootPrefix.split('/').some((part) => part === '.' || part === '..')) {
+    throw new Error('WASABI_ROOT_PREFIX cannot contain traversal segments');
+  }
   const normalizedPrefix = normalizePrefix(env.ABY_STORAGE_PREFIX);
   const audioPrefix = normalizePrefix(env.ABY_AUDIO_PREFIX);
   const videoPrefix = normalizePrefix(env.ABY_VIDEO_PREFIX);
@@ -55,6 +60,7 @@ export function readConfig(environment: NodeJS.ProcessEnv = process.env) {
     production,
     demoMode,
     storagePrefix: normalizedPrefix,
+    wasabiRootPrefix,
     audioPrefix,
     videoPrefix,
     sourceAudioPrefix,

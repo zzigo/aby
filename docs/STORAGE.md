@@ -2,7 +2,9 @@
 
 ## Canonical and legacy boundaries
 
-The private Wasabi bucket `zzttuntref` has two existing source pools:
+The human-facing rclone root is `wasabi:zzttuntref/`. Operationally, that alias maps to the private bucket `untref-licmusica` and bucket-relative prefix `zzttuntref/`; Aby keeps that physical detail in `WASABI_ROOT_PREFIX` and stores human-readable logical keys below it.
+
+The root has two existing source pools:
 
 ```text
 ref/   legacy audio reference archive

@@ -140,7 +140,7 @@ export async function inspectWasabiSource(
       },
       provenance: {
         method: 'calculated',
-        source: `wasabi:${config.WASABI_BUCKET}/${sourceObjectKey}`,
+        source: `wasabi:${config.wasabiRootPrefix}${sourceObjectKey}`,
         actorId: ownerId,
         tool: identification ? 'sha256 + ffprobe + MusicBrainz' : 'sha256 + ffprobe',
         toolVersion: inspected.toolVersion,

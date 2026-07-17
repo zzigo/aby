@@ -27,6 +27,12 @@ export function assertSourceObjectKey(value: string, prefixes = ['ref/', 'mov/']
   return key;
 }
 
+export function toWasabiKey(logicalObjectKey: string, rootPrefix = ''): string {
+  const key = normalizeObjectKey(logicalObjectKey);
+  const root = rootPrefix ? normalizeObjectKey(rootPrefix).replace(/\/+$/, '') + '/' : '';
+  return `${root}${key}`;
+}
+
 let client: S3Client | undefined;
 
 function wasabiClient(): S3Client {
@@ -48,21 +54,21 @@ function wasabiClient(): S3Client {
 export async function headWasabiObject(objectKey: string) {
   const config = readConfig();
   const key = assertAbyObjectKey(objectKey, config.storagePrefix);
-  const response = await wasabiClient().send(new HeadObjectCommand({ Bucket: config.WASABI_BUCKET!, Key: key }));
+  const response = await wasabiClient().send(new HeadObjectCommand({ Bucket: config.WASABI_BUCKET!, Key: toWasabiKey(key, config.wasabiRootPrefix) }));
   return { objectKey: key, sizeBytes: response.ContentLength, contentType: response.ContentType, etag: response.ETag };
 }
 
 export async function headWasabiSourceObject(objectKey: string) {
   const config = readConfig();
   const key = assertSourceObjectKey(objectKey, [config.sourceAudioPrefix, config.sourceVideoPrefix]);
-  const response = await wasabiClient().send(new HeadObjectCommand({ Bucket: config.WASABI_BUCKET!, Key: key }));
+  const response = await wasabiClient().send(new HeadObjectCommand({ Bucket: config.WASABI_BUCKET!, Key: toWasabiKey(key, config.wasabiRootPrefix) }));
   return { objectKey: key, sizeBytes: response.ContentLength, contentType: response.ContentType, etag: response.ETag };
 }
 
 export async function downloadWasabiSourceObject(objectKey: string, destinationPath: string): Promise<void> {
   const config = readConfig();
   const key = assertSourceObjectKey(objectKey, [config.sourceAudioPrefix, config.sourceVideoPrefix]);
-  const response = await wasabiClient().send(new GetObjectCommand({ Bucket: config.WASABI_BUCKET!, Key: key }));
+  const response = await wasabiClient().send(new GetObjectCommand({ Bucket: config.WASABI_BUCKET!, Key: toWasabiKey(key, config.wasabiRootPrefix) }));
   if (!(response.Body instanceof Readable)) {
     throw new AbyError('source_stream_unavailable', 'Wasabi did not return a readable source stream', 502);
   }
@@ -78,7 +84,7 @@ export async function playbackUrl(asset: Asset): Promise<{ url: string; expiresA
   const key = assertAbyObjectKey(asset.objectKey, config.storagePrefix);
   const expiresIn = config.ABY_PRESIGNED_URL_TTL_SECONDS;
   const url = await getSignedUrl(wasabiClient(), new GetObjectCommand({
-    Bucket: asset.bucket || config.WASABI_BUCKET!, Key: key,
+    Bucket: asset.bucket || config.WASABI_BUCKET!, Key: toWasabiKey(key, config.wasabiRootPrefix),
     ResponseContentDisposition: `inline; filename="${asset.originalFilename.replace(/["\r\n]/g, '_')}"`
   }), { expiresIn });
   return { url, expiresAt: new Date(Date.now() + expiresIn * 1000).toISOString() };

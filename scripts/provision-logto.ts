@@ -153,6 +153,7 @@ if (application.type !== 'Traditional') throw new Error('Existing Aby Logto appl
 const { secret } = await applicationSecret(application.id);
 let environment = await readFile(envPath, 'utf8');
 environment = setEnv(environment, 'ABY_STORAGE_PREFIX', 'aby/');
+environment = setEnv(environment, 'WASABI_ROOT_PREFIX', 'zzttuntref/');
 environment = setEnv(environment, 'ABY_AUDIO_PREFIX', 'aby/aud/');
 environment = setEnv(environment, 'ABY_VIDEO_PREFIX', 'aby/mov/');
 environment = setEnv(environment, 'ABY_SOURCE_AUDIO_PREFIX', 'ref/');
