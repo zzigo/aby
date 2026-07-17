@@ -1,4 +1,4 @@
-import { api } from '$lib/server/errors';
+import { api, ownerFor } from '$lib/server/errors';
 import { listWasabiSourceKeys } from '$lib/server/storage';
 import { readConfig } from '$lib/server/config';
 import type { RequestHandler } from './$types';
@@ -88,6 +88,7 @@ function randomSample<T>(values: T[], size: number): T[] {
 }
 
 export const GET: RequestHandler = (event) => api('ingest.sources', async () => {
+  ownerFor(event);
   const config = readConfig();
   if (config.demoMode) {
     return { sources: [sourceRecord('ref/20 late/Gavin Bryars/The Sinking of the Titanic/Sinking of the Titanic.mp3')], total: 1 };
