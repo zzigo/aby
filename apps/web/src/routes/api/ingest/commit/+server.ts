@@ -10,6 +10,7 @@ export const POST: RequestHandler = (event) => api('ingest.commit', async () => 
     input.previewId,
     input.workTitle,
     input.recordingTitle,
+    input.albumTitle,
     input.creator,
     input.date,
     input.releaseDate,
@@ -18,4 +19,3 @@ export const POST: RequestHandler = (event) => api('ingest.commit', async () => 
   );
   return { asset, event: { type: 'aby.asset.committed.v1', assetId: asset.id, ownerId: asset.ownerId, occurredAt: new Date().toISOString() } };
 });
-

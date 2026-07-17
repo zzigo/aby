@@ -1,10 +1,12 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import { SvelteMap } from 'svelte/reactivity';
   import type { CatalogItem, CatalogSegment } from '@zztt/aby-domain';
   import type { PageData } from './$types';
   import { formatDuration } from '$lib/presentation';
   import { currentPlayback, currentPlaybackTimeMs, loadPlayback, loadSegmentPlayback } from '$lib/player';
   import SpectrogramView from '$lib/components/SpectrogramView.svelte';
+  import TrackEditor from '$lib/components/TrackEditor.svelte';
 
   const views = ['Cover', 'Spectrogram'] as const;
   let { data }: { data: PageData } = $props();
@@ -18,6 +20,10 @@
   let favoriteFolders = $state<string[]>([]);
   let recentFolders = $state<string[]>([]);
   let folderTreeOpen = $state(false);
+  let openActionsId = $state<string | null>(null);
+  let editingItem = $state<CatalogItem | null>(null);
+  let itemGesture = { id: '', x: 0, y: 0 };
+  let suppressClickId = '';
   let gestureStart = { x: 0, y: 0 };
   let drawerGestureY = 0;
   const storageSuffix = $derived(data.user?.id ?? 'anonymous');
@@ -37,6 +43,30 @@
   const shortcutFolders = $derived([...favoriteFolders, ...recentFolders]
     .filter((path, index, paths) => paths.indexOf(path) === index && folderOptions.includes(path)).slice(0, 5));
   const visibleItems = $derived(activeFolder ? items.filter((item) => item.asset.objectKey.startsWith(`${activeFolder}/`)) : items);
+  const catalogGroups = $derived.by(() => {
+    const works = new SvelteMap<string, { id: string; title: string; direct: CatalogItem[]; albums: SvelteMap<string, { id: string; title: string; items: CatalogItem[] }> }>();
+    for (const item of visibleItems) {
+      let work = works.get(item.asset.workId);
+      if (!work) {
+        work = { id: item.asset.workId, title: item.workTitle, direct: [], albums: new SvelteMap() };
+        works.set(item.asset.workId, work);
+      }
+      if (item.albumId && item.albumTitle) {
+        let album = work.albums.get(item.albumId);
+        if (!album) { album = { id: item.albumId, title: item.albumTitle, items: [] }; work.albums.set(item.albumId, album); }
+        album.items.push(item);
+      } else work.direct.push(item);
+    }
+    const sortTracks = (tracks: CatalogItem[]) => tracks.sort((a, b) =>
+      (a.trackNumber ?? Number.MAX_SAFE_INTEGER) - (b.trackNumber ?? Number.MAX_SAFE_INTEGER)
+      || a.recordingTitle.localeCompare(b.recordingTitle, undefined, { numeric: true })
+    );
+    return [...works.values()].map((work) => ({
+      ...work, direct: sortTracks(work.direct),
+      albums: [...work.albums.values()].map((album) => ({ ...album, items: sortTracks(album.items) }))
+        .sort((a, b) => a.title.localeCompare(b.title))
+    })).sort((a, b) => a.title.localeCompare(b.title));
+  });
 
   function folderLabel(path: string) {
     return path.replace(/^aby\//, '');
@@ -145,6 +175,57 @@
     } catch (error) {
       message = error instanceof Error ? error.message : 'Segment playback failed';
     }
+  }
+
+  function startItemGesture(event: PointerEvent, item: CatalogItem) {
+    itemGesture = { id: item.asset.id, x: event.clientX, y: event.clientY };
+    (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
+  }
+
+  async function endItemGesture(event: PointerEvent, item: CatalogItem) {
+    if (itemGesture.id !== item.asset.id) return;
+    const deltaX = event.clientX - itemGesture.x;
+    const deltaY = event.clientY - itemGesture.y;
+    if (Math.abs(deltaX) < 64 || Math.abs(deltaX) <= Math.abs(deltaY)) return;
+    suppressClickId = item.asset.id;
+    if (deltaX > 0) openActionsId = openActionsId === item.asset.id ? null : item.asset.id;
+    else await removeItem(item);
+  }
+
+  function playFromCatalog(item: CatalogItem) {
+    if (suppressClickId === item.asset.id) { suppressClickId = ''; return; }
+    playItem(item);
+  }
+
+  async function removeItem(item: CatalogItem) {
+    const before = items;
+    items = items.filter((candidate) => candidate.asset.id !== item.asset.id);
+    if (selected?.asset.id === item.asset.id) selected = items[0] ?? null;
+    try {
+      const response = await fetch(`/api/assets/${item.asset.id}`, { method: 'DELETE' });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error?.message ?? 'Delete failed');
+      message = '';
+    } catch (error) {
+      items = before;
+      message = error instanceof Error ? error.message : 'Delete failed';
+    }
+  }
+
+  function replaceItem(updated: CatalogItem) {
+    items = items.map((item) => item.asset.id === updated.asset.id ? updated : item);
+    if (selected?.asset.id === updated.asset.id) selected = updated;
+    if (editingItem?.asset.id === updated.asset.id) editingItem = updated;
+  }
+
+  async function regenerateItem(item: CatalogItem) {
+    message = 'Refreshing metadata…';
+    try {
+      const response = await fetch(`/api/assets/${item.asset.id}/metadata`, { method: 'POST' });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error?.message ?? 'Metadata refresh failed');
+      replaceItem(body.item); openActionsId = null; message = '';
+    } catch (error) { message = error instanceof Error ? error.message : 'Metadata refresh failed'; }
   }
 
   let isPressing = $state(false);
@@ -299,29 +380,47 @@
         {/each}
       </div>
     {/if}
+    {#snippet trackRow(item: CatalogItem)}
+      <article class:selected={selected?.asset.id === item.asset.id} class:actions-open={openActionsId === item.asset.id} onpointerdown={(event) => startItemGesture(event, item)} onpointerup={(event) => endItemGesture(event, item)}>
+        <div class="item-actions" aria-hidden={openActionsId !== item.asset.id}>
+          <button onclick={() => regenerateItem(item)} title="Regenerate metadata" aria-label="Regenerate metadata">↻</button>
+          <button onclick={() => editingItem = item} title="Edit track" aria-label="Edit track">✎</button>
+        </div>
+        <button class="catalog-primary" onclick={() => playFromCatalog(item)}>
+          <span class="catalog-index">{item.trackNumber ? String(item.trackNumber).padStart(2, '0') : '—'}</span>
+          {#if item.coverUrl}<img src={item.coverUrl} alt="" />{:else}<span class="catalog-cover-fallback">A</span>{/if}
+          <span class="catalog-copy"><strong>{item.recordingTitle}</strong><small>{item.creator ?? item.workTitle}</small></span>
+          <span class="catalog-duration">{formatDuration(item.asset.technicalMetadata.durationMs)}</span>
+        </button>
+        {#if item.segments.length}<div class="catalog-segments">{#each item.segments as segment (segment.id)}<button onclick={() => playSegment(item, segment)}><span>{segment.label ?? 'Segment'}</span><small>{formatDuration(segment.startTimeMs)}–{formatDuration(segment.endTimeMs)}</small></button>{/each}</div>{/if}
+      </article>
+    {/snippet}
     <div class="catalog-items">
-      {#each visibleItems as item, index (item.asset.id)}
-        <article class:selected={selected?.asset.id === item.asset.id}>
-          <button class="catalog-primary" onclick={() => playItem(item)}>
-            <span class="catalog-index">{String(index + 1).padStart(2, '0')}</span>
-            {#if item.coverUrl}<img src={item.coverUrl} alt="" />{:else}<span class="catalog-cover-fallback">A</span>{/if}
-            <span class="catalog-copy"><strong>{item.workTitle}</strong><small>{item.creator ?? item.recordingTitle}</small></span>
-            <span class="catalog-duration">{formatDuration(item.asset.technicalMetadata.durationMs)}</span>
-          </button>
-          {#if item.segments.length}
-            <div class="catalog-segments">
-              {#each item.segments as segment (segment.id)}
-                <button onclick={() => playSegment(item, segment)}>
-                  <span>{segment.label ?? 'Segment'}</span>
-                  <small>{formatDuration(segment.startTimeMs)}–{formatDuration(segment.endTimeMs)}</small>
-                </button>
-              {/each}
-            </div>
-          {/if}
-        </article>
+      {#each catalogGroups as work (work.id)}
+        <section class="work-group">
+          <h3>{work.title}</h3>
+          {#each work.direct as item (item.asset.id)}{@render trackRow(item)}{/each}
+          {#each work.albums as album (album.id)}
+            <details class="album-group">
+              <summary><span>{album.title}</span><small>{album.items.length} tracks</small></summary>
+              {#each album.items as item (item.asset.id)}{@render trackRow(item)}{/each}
+            </details>
+          {/each}
+        </section>
       {:else}
         <p class="catalog-empty">{items.length ? 'No items in this Aby folder.' : 'The catalog is empty.'}</p>
       {/each}
     </div>
   </aside>
 </main>
+
+{#if editingItem}
+  {#key editingItem.asset.id}<TrackEditor item={editingItem} onclose={() => editingItem = null} onsaved={replaceItem} />{/key}
+{/if}
+
+<style>
+  .work-group>h3{margin:16px 14px 7px;font:600 11px/1.2 ui-monospace,monospace;letter-spacing:.08em;text-transform:uppercase;color:var(--signal)}
+  .album-group{margin:0;border-top:1px solid var(--line)}.album-group summary{display:flex;justify-content:space-between;align-items:center;padding:11px 14px;cursor:pointer;font-size:12px;background:#121411;list-style-position:inside}.album-group summary small{color:var(--muted);font:9px ui-monospace,monospace}.album-group[open] summary{background:#181b16}
+  .catalog-items article{position:relative;overflow:hidden;touch-action:pan-y}.catalog-primary{position:relative;z-index:1;transition:transform .16s ease;background:var(--surface)}.actions-open .catalog-primary{transform:translateX(92px)}
+  .item-actions{position:absolute;inset:0 auto 0 0;width:92px;display:grid;grid-template-columns:1fr 1fr;background:var(--signal)}.item-actions button{border:0;border-right:1px solid #1c2117;background:transparent;color:#10110f;font-size:20px}
+</style>

@@ -25,6 +25,13 @@ interface MusicBrainzRelease {
   'label-info'?: Array<{ 'catalog-number'?: string; label?: { id?: string; name?: string } }>;
 }
 
+interface MusicBrainzReleaseGroup {
+  id: string;
+  title: string;
+  score?: number;
+  'artist-credit'?: MusicBrainzArtistCredit[];
+}
+
 interface CoverArtDocument {
   release?: string;
   images?: Array<{
@@ -87,6 +94,63 @@ async function optionalCoverArt(fetcher: typeof fetch, url: URL, userAgent: stri
 }
 
 const sleep = (milliseconds: number) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+
+export async function searchMusicBrainzArtists(query: string, options: IdentifyOptions = {}) {
+  const value = query.trim();
+  if (value.length < 2) return [];
+  const config = readConfig();
+  const fetcher = options.fetcher ?? fetch;
+  const url = new URL(`${config.MUSICBRAINZ_BASE_URL.replace(/\/+$/, '')}/artist/`);
+  url.searchParams.set('query', `artist:${quoted(value)}`);
+  url.searchParams.set('fmt', 'json');
+  url.searchParams.set('limit', '8');
+  const result = await jsonRequest<{ artists?: Array<{ id: string; name: string; 'sort-name'?: string; disambiguation?: string; score?: number }> }>(
+    fetcher, url, `Aby/0.1.0 (${config.ABY_EXTERNAL_METADATA_CONTACT})`
+  );
+  return (result.artists ?? []).map((artist) => ({
+    id: artist.id,
+    name: artist.name,
+    sortName: artist['sort-name'] ?? artist.name,
+    disambiguation: artist.disambiguation ?? '',
+    score: (artist.score ?? 0) / 100
+  }));
+}
+
+export async function findAlbumArtwork(
+  input: { creator: string; albumTitle: string },
+  options: IdentifyOptions = {}
+): Promise<MusicBrainzIdentification['cover'] | null> {
+  if (!input.creator.trim() || !input.albumTitle.trim()) return null;
+  const config = readConfig();
+  const fetcher = options.fetcher ?? fetch;
+  const userAgent = `Aby/0.1.0 (${config.ABY_EXTERNAL_METADATA_CONTACT})`;
+  const url = new URL(`${config.MUSICBRAINZ_BASE_URL.replace(/\/+$/, '')}/release-group/`);
+  url.searchParams.set('query', `artist:${quoted(input.creator)} AND releasegroup:${quoted(input.albumTitle)}`);
+  url.searchParams.set('fmt', 'json');
+  url.searchParams.set('limit', '10');
+  const result = await jsonRequest<{ 'release-groups'?: MusicBrainzReleaseGroup[] }>(fetcher, url, userAgent);
+  const creator = normalizeName(input.creator);
+  const title = normalizeName(input.albumTitle);
+  const candidate = (result['release-groups'] ?? []).find((group) => {
+    const artist = group['artist-credit']?.map((credit) => credit.name || credit.artist?.name || '').join(' ') ?? '';
+    return normalizeName(group.title) === title && normalizeName(artist).includes(creator);
+  }) ?? result['release-groups']?.[0];
+  if (!candidate) return null;
+  const document = await optionalCoverArt(
+    fetcher,
+    new URL(`${config.COVER_ART_ARCHIVE_BASE_URL.replace(/\/+$/, '')}/release-group/${candidate.id}/`),
+    userAgent
+  );
+  const image = document?.images?.find((entry) => entry.front && entry.approved !== false)
+    ?? document?.images?.find((entry) => entry.approved !== false);
+  const imageUrl = image?.thumbnails?.['500'] ?? image?.thumbnails?.large ?? image?.image;
+  return image && imageUrl ? {
+    url: imageUrl.replace(/^http:/, 'https:'),
+    exactRelease: false,
+    sourceId: image.id,
+    sourceRelease: document?.release
+  } : null;
+}
 
 export async function identifyWithMusicBrainz(
   input: { creator: string; workTitle: string; durationMs: number },

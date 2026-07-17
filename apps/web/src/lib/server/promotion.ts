@@ -26,7 +26,8 @@ export async function promoteIngestCandidate(ownerId: string, previewId: string,
     canonicalObjectKey: targetObjectKey,
     checksumSha256: preview.checksumSha256,
     technicalMetadata: preview.technicalMetadata,
-    recordingTitle: preview.candidateMetadata.recordingTitle
+    recordingTitle: preview.candidateMetadata.recordingTitle,
+    sourceObjectKey: undefined
   }];
 
   const promotedTracks = [];
@@ -61,6 +62,7 @@ export async function promoteIngestCandidate(ownerId: string, previewId: string,
 
       promotedTracks.push({
         ...track,
+        sourceObjectKey: track.sourceObjectKey ?? track.objectKey,
         objectKey: track.canonicalObjectKey
       });
     }

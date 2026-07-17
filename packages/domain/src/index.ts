@@ -46,6 +46,8 @@ export type TechnicalMetadata = z.infer<typeof TechnicalMetadataSchema>;
 export const CandidateMetadataSchema = z.object({
   title: z.string().min(1),
   recordingTitle: z.string().min(1),
+  albumTitle: z.string().min(1).optional(),
+  trackNumber: z.number().int().positive().optional(),
   recordingFolder: z.string().min(1).optional(),
   creator: z.string().optional(),
   date: z.string().optional(),
@@ -66,7 +68,7 @@ export const CandidateMetadataSchema = z.object({
   })).optional(),
   imageCandidates: z.array(z.object({
     authority: z.string().min(1),
-    url: z.string().url(),
+    url: z.string().min(1),
     kind: z.enum(['cover', 'feature']),
     exactRelease: z.boolean(),
     sourceId: z.string().min(1),
@@ -79,13 +81,23 @@ export const CandidateMetadataSchema = z.object({
     imageUrl: z.string().url().optional(),
     birthDate: z.string().optional()
   }).optional(),
+  derivatives: z.array(z.object({
+    kind: z.string(),
+    objectKey: z.string(),
+    format: z.string(),
+    codec: z.string(),
+    quality: z.number().optional(),
+    createdAt: z.string().datetime()
+  })).optional(),
   tracks: z.array(z.object({
     objectKey: z.string(),
+    sourceObjectKey: z.string().optional(),
     canonicalObjectKey: z.string(),
     originalFilename: z.string(),
     checksumSha256: z.string(),
     technicalMetadata: TechnicalMetadataSchema,
-    recordingTitle: z.string()
+    recordingTitle: z.string(),
+    trackNumber: z.number().int().positive().optional()
   })).optional()
 });
 export type CandidateMetadata = z.infer<typeof CandidateMetadataSchema>;
@@ -143,6 +155,7 @@ export const CommitIngestSchema = z.object({
   previewId: IdentifierSchema,
   workTitle: z.string().trim().min(1).max(500),
   recordingTitle: z.string().trim().min(1).max(500),
+  albumTitle: z.string().trim().max(500).optional(),
   creator: z.string().trim().max(500).optional(),
   date: z.string().trim().max(500).optional(),
   releaseDate: z.string().trim().max(500).optional(),
@@ -156,6 +169,7 @@ export const AssetSchema = z.object({
   ownerId: z.string().min(1),
   workId: IdentifierSchema,
   recordingId: IdentifierSchema,
+  albumId: IdentifierSchema.optional(),
   provider: z.enum(['local-fixture', 'wasabi', 's3']),
   bucket: z.string().optional(),
   objectKey: z.string(),
@@ -181,13 +195,36 @@ export const CatalogItemSchema = z.object({
   asset: AssetSchema,
   workTitle: z.string().min(1),
   recordingTitle: z.string().min(1),
+  albumId: IdentifierSchema.optional(),
+  albumTitle: z.string().optional(),
+  trackNumber: z.number().int().positive().optional(),
   creator: z.string().optional(),
-  coverUrl: z.string().url().optional(),
+  coverUrl: z.string().min(1).optional(),
   releaseDate: z.string().optional(),
   label: z.string().optional(),
   segments: z.array(CatalogSegmentSchema)
 });
 export type CatalogItem = z.infer<typeof CatalogItemSchema>;
+
+export const ConversionSettingsSchema = z.object({
+  container: z.literal('ogg').default('ogg'),
+  codec: z.enum(['libvorbis', 'libopus']).default('libvorbis'),
+  quality: z.number().int().min(0).max(10).default(6)
+});
+export type ConversionSettings = z.infer<typeof ConversionSettingsSchema>;
+
+export const TrackEditSchema = z.object({
+  workTitle: z.string().trim().min(1).max(500),
+  albumTitle: z.string().trim().max(500).nullable().optional(),
+  recordingTitle: z.string().trim().min(1).max(500),
+  trackNumber: z.number().int().positive().nullable().optional(),
+  creator: z.string().trim().max(500).nullable().optional(),
+  date: z.string().trim().max(500).nullable().optional(),
+  releaseDate: z.string().trim().max(500).nullable().optional(),
+  label: z.string().trim().max(500).nullable().optional(),
+  catalogNumber: z.string().trim().max(500).nullable().optional()
+});
+export type TrackEdit = z.infer<typeof TrackEditSchema>;
 
 export const SegmentCreateSchema = z.object({
   assetId: IdentifierSchema,

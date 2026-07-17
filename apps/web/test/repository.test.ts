@@ -39,6 +39,18 @@ describe('preview-before-write repository flow', () => {
     expect(await repository.getAsset('owner-b', asset.id)).toBeNull();
   });
 
+  test('keeps an optional album between work and track and supports soft deletion', async () => {
+    const repository = new MemoryAbyRepository();
+    const preview = await repository.savePreview(fixturePreview());
+    const asset = await repository.commitPreview('owner-a', preview.id, 'Work', 'Track', 'Album');
+    const [item] = await repository.listCatalog('owner-a');
+    expect(item?.workTitle).toBe('Work');
+    expect(item?.albumTitle).toBe('Album');
+    expect(item?.recordingTitle).toBe('Track');
+    await repository.softDeleteAsset('owner-a', asset.id);
+    expect(await repository.listCatalog('owner-a')).toHaveLength(0);
+  });
+
   test('promotion switches authority and preserves the source as retirement provenance', async () => {
     const repository = new MemoryAbyRepository();
     const source = fixturePreview();

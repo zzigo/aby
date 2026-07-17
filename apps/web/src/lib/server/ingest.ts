@@ -19,13 +19,14 @@ function pathSegment(value: string): string {
   return segment;
 }
 
-function assetFilename(workTitle: string, originalFilename: string, isAlbum: boolean = false): string {
-  if (!isAlbum) {
-    return `${pathSegment(workTitle)}${extname(originalFilename).toLowerCase()}`;
-  }
+export function parseTrackFilename(originalFilename: string): { title: string; trackNumber?: number; filename: string } {
   const ext = extname(originalFilename).toLowerCase();
   const base = basename(originalFilename, extname(originalFilename));
-  return `${pathSegment(base)}${ext}`;
+  const match = base.match(/^\s*(\d{1,3})(?:\s*[.\-_]+\s*|\s+)(.+?)\s*$/u);
+  const trackNumber = match ? Number(match[1]) : undefined;
+  const title = pathSegment((match?.[2] ?? base).replace(/\s+/g, ' ').trim());
+  const prefix = trackNumber === undefined ? '' : `${String(trackNumber).padStart(2, '0')}-`;
+  return { title, ...(trackNumber !== undefined ? { trackNumber } : {}), filename: `${prefix}${title}${ext}` };
 }
 
 export async function inspectFixture(ownerId: string, repository: AbyRepository): Promise<IngestPreview> {
@@ -65,8 +66,11 @@ export async function inspectWasabiSource(
     throw new AbyError('source_media_mismatch', `${input.mediaKind} sources must remain below ${expectedSourcePrefix}`, 400);
   }
 
-  // Find all sibling tracks in the same folder to represent the complete album!
+  // A source folder may represent an album. It remains optional: a lone file is a direct Work → Track.
   const siblingKeys = await listWasabiSiblingKeys(sourceObjectKey);
+  if (!siblingKeys.includes(sourceObjectKey)) {
+    throw new AbyError('unsupported_source_media', 'The selected source is not a supported audio or video file', 400);
+  }
 
   const directory = await mkdtemp(join(tmpdir(), 'aby-source-preview-'));
   try {
@@ -103,7 +107,7 @@ export async function inspectWasabiSource(
     }
 
     const creator = identification?.artistName || input.creatorDisplay;
-    const workTitle = identification?.releaseTitle || input.workTitle;
+    const workTitle = input.workTitle;
     const entitySlug = identification?.artistName
       ? identification.artistName.normalize('NFKD')
           .replace(/[\u0300-\u036f]/g, '')
@@ -112,7 +116,8 @@ export async function inspectWasabiSource(
       : input.entitySlug;
 
     const wikidata = creator ? await fetchWikidataEntity(creator) : null;
-    const recordingTitle = input.recordingTitle || identification?.recordingTitle || input.workTitle;
+    const recordingTitle = identification?.recordingTitle || input.recordingTitle || input.workTitle;
+    const albumTitle = identification?.releaseTitle || (siblingKeys.length > 1 ? basename(dirname(sourceObjectKey)) : undefined);
     const recordingFolder = recordingFolderName({
       ...(identification?.releaseDate ? { releaseDate: identification.releaseDate } : {}),
       ...(identification?.label ? { label: identification.label } : {}),
@@ -120,13 +125,14 @@ export async function inspectWasabiSource(
     });
     const canonicalPrefix = input.mediaKind === 'aud' ? config.audioPrefix : config.videoPrefix;
     
+    const parsedMainTrack = parseTrackFilename(basename(sourceObjectKey));
     const targetObjectKey = normalizeObjectKey([
       canonicalPrefix.replace(/\/$/, ''),
       input.collectionCode,
       entitySlug,
       pathSegment(workTitle),
-      pathSegment(recordingFolder),
-      assetFilename(workTitle, basename(sourceObjectKey), siblingKeys.length > 1)
+      ...(albumTitle ? [pathSegment(recordingFolder)] : []),
+      parsedMainTrack.filename
     ].join('/'));
     
     const identificationCandidates = identification ? [{
@@ -162,17 +168,7 @@ export async function inspectWasabiSource(
         sourceRelease: identification.cover.sourceRelease,
         fallback: identification.cover.exactRelease ? 'exact-release' : 'release-group'
       }
-    }] : (wikidata?.imageUrl ? [{
-      authority: 'wikidata',
-      url: wikidata.imageUrl,
-      kind: 'feature' as const,
-      exactRelease: false,
-      sourceId: wikidata.qid,
-      provenance: {
-        wikidataQid: wikidata.qid,
-        source: 'wikidata-image-fallback'
-      }
-    }] : []);
+    }] : [];
 
     // 2. Inspect all sibling files (tracks) in the album folder
     const tracks = [];
@@ -195,16 +191,15 @@ export async function inspectWasabiSource(
       }
       
       if (siblingInspected) {
-        const nameWithoutExt = basename(siblingKey, extname(siblingKey));
-        const cleanedTitle = nameWithoutExt.replace(/^\d+[\s.\-_]+/, '').trim();
+        const parsedTrack = parseTrackFilename(basename(siblingKey));
         
         const siblingTargetObjectKey = normalizeObjectKey([
           canonicalPrefix.replace(/\/$/, ''),
           input.collectionCode,
           entitySlug,
           pathSegment(workTitle),
-          pathSegment(recordingFolder),
-          assetFilename(workTitle, basename(siblingKey), siblingKeys.length > 1)
+          ...(albumTitle ? [pathSegment(recordingFolder)] : []),
+          parsedTrack.filename
         ].join('/'));
 
         tracks.push({
@@ -213,10 +208,15 @@ export async function inspectWasabiSource(
           originalFilename: basename(siblingKey),
           checksumSha256: siblingInspected.checksumSha256,
           technicalMetadata: { ...siblingInspected.metadata, sizeBytes: siblingSizeBytes },
-          recordingTitle: cleanedTitle
+          recordingTitle: parsedTrack.title,
+          ...(parsedTrack.trackNumber !== undefined ? { trackNumber: parsedTrack.trackNumber } : {})
         });
       }
     }
+    tracks.sort((left, right) =>
+      (left.trackNumber ?? Number.MAX_SAFE_INTEGER) - (right.trackNumber ?? Number.MAX_SAFE_INTEGER)
+      || left.originalFilename.localeCompare(right.originalFilename, undefined, { numeric: true })
+    );
 
     const preview: IngestPreview = {
       id: randomUUID(),
@@ -231,6 +231,8 @@ export async function inspectWasabiSource(
       candidateMetadata: {
         title: workTitle,
         recordingTitle,
+        ...(albumTitle ? { albumTitle } : {}),
+        ...(parsedMainTrack.trackNumber !== undefined ? { trackNumber: parsedMainTrack.trackNumber } : {}),
         recordingFolder,
         creator,
         ...(identification?.releaseDate ? { releaseDate: identification.releaseDate } : {}),

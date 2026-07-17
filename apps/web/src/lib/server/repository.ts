@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import pg from 'pg';
-import type { Asset, CatalogItem, IngestPreview, Provenance, Segment, SegmentCreate } from '@zztt/aby-domain';
+import type { Asset, CatalogItem, ConversionSettings, IngestPreview, Provenance, Segment, SegmentCreate, TrackEdit } from '@zztt/aby-domain';
 import { AbyError } from './errors';
 import { readConfig } from './config';
 
@@ -33,6 +33,7 @@ export interface AbyRepository {
     previewId: string,
     workTitle: string,
     recordingTitle: string,
+    albumTitle?: string,
     creator?: string,
     date?: string,
     releaseDate?: string,
@@ -40,6 +41,12 @@ export interface AbyRepository {
     catalogNumber?: string
   ): Promise<Asset>;
   listCatalog(ownerId: string): Promise<CatalogItem[]>;
+  getCatalogItem(ownerId: string, assetId: string): Promise<CatalogItem | null>;
+  updateCatalogItem(ownerId: string, assetId: string, input: TrackEdit): Promise<CatalogItem>;
+  softDeleteAsset(ownerId: string, assetId: string): Promise<void>;
+  getConversionSettings(ownerId: string): Promise<ConversionSettings>;
+  saveConversionSettings(ownerId: string, settings: ConversionSettings): Promise<ConversionSettings>;
+  mergeCanonicalMetadata(ownerId: string, assetId: string, metadata: Record<string, unknown>): Promise<CatalogItem>;
   getAsset(ownerId: string, assetId: string): Promise<Asset | null>;
   getSpectrogramAnalysis(ownerId: string, assetId: string): Promise<SpectrogramAnalysis | null>;
   saveSpectrogramAnalysis(ownerId: string, asset: Asset, input: Omit<SpectrogramAnalysis, 'id' | 'assetId' | 'sourceAssetChecksum' | 'createdAt'>): Promise<SpectrogramAnalysis>;
@@ -55,6 +62,7 @@ export class MemoryAbyRepository implements AbyRepository {
   readonly #assets = new Map<string, Asset>();
   readonly #segments = new Map<string, Segment>();
   readonly #spectrograms = new Map<string, SpectrogramAnalysis>();
+  readonly #settings = new Map<string, ConversionSettings>();
 
   async savePreview(preview: IngestPreview): Promise<IngestPreview> {
     this.#previews.set(preview.id, structuredClone(preview));
@@ -97,6 +105,7 @@ export class MemoryAbyRepository implements AbyRepository {
     previewId: string,
     workTitle: string,
     recordingTitle: string,
+    albumTitle?: string,
     creator?: string,
     date?: string,
     releaseDate?: string,
@@ -129,6 +138,7 @@ export class MemoryAbyRepository implements AbyRepository {
     }
     const now = new Date().toISOString();
     const workId = randomUUID();
+    const albumId = albumTitle || preview.candidateMetadata.albumTitle ? randomUUID() : undefined;
     const provenance = accepted({ ...preview.provenance, jobId: preview.id }, ownerId);
     
     const tracks = preview.candidateMetadata.tracks || [{
@@ -136,7 +146,8 @@ export class MemoryAbyRepository implements AbyRepository {
       originalFilename: preview.originalFilename,
       checksumSha256: preview.checksumSha256,
       technicalMetadata: preview.technicalMetadata,
-      recordingTitle: recordingTitle
+      recordingTitle: recordingTitle,
+      trackNumber: preview.candidateMetadata.trackNumber
     }];
 
     const finalCreator = creator !== undefined ? creator : preview.candidateMetadata.creator;
@@ -156,7 +167,7 @@ export class MemoryAbyRepository implements AbyRepository {
       }
 
       const asset: Asset = {
-        id: randomUUID(), ownerId, workId, recordingId: randomUUID(), provider: preview.provider,
+        id: randomUUID(), ownerId, workId, recordingId: randomUUID(), ...(albumId ? { albumId } : {}), provider: preview.provider,
         ...(preview.bucket ? { bucket: preview.bucket } : {}), objectKey: track.objectKey,
         originalFilename: track.originalFilename, checksumSha256: track.checksumSha256,
         technicalMetadata: track.technicalMetadata,
@@ -164,6 +175,8 @@ export class MemoryAbyRepository implements AbyRepository {
           ...preview.candidateMetadata, 
           title: workTitle, 
           recordingTitle: track.recordingTitle, 
+          ...(albumTitle || preview.candidateMetadata.albumTitle ? { albumTitle: albumTitle || preview.candidateMetadata.albumTitle } : {}),
+          ...(track.trackNumber !== undefined ? { trackNumber: track.trackNumber } : {}),
           creator: finalCreator,
           date: finalDate,
           releaseDate: finalReleaseDate,
@@ -211,6 +224,9 @@ export class MemoryAbyRepository implements AbyRepository {
         asset: structuredClone(asset),
         workTitle: asset.canonicalMetadata.title,
         recordingTitle: asset.canonicalMetadata.recordingTitle,
+        ...(asset.albumId ? { albumId: asset.albumId } : {}),
+        ...(asset.canonicalMetadata.albumTitle ? { albumTitle: asset.canonicalMetadata.albumTitle } : {}),
+        ...(asset.canonicalMetadata.trackNumber ? { trackNumber: asset.canonicalMetadata.trackNumber } : {}),
         ...(asset.canonicalMetadata.creator ? { creator: asset.canonicalMetadata.creator } : {}),
         ...(asset.canonicalMetadata.imageCandidates?.[0]?.url ? { coverUrl: asset.canonicalMetadata.imageCandidates[0].url } : {}),
         ...(asset.canonicalMetadata.releaseDate ? { releaseDate: asset.canonicalMetadata.releaseDate } : {}),
@@ -227,6 +243,50 @@ export class MemoryAbyRepository implements AbyRepository {
       }));
   }
 
+  async getCatalogItem(ownerId: string, assetId: string): Promise<CatalogItem | null> {
+    return (await this.listCatalog(ownerId)).find((item) => item.asset.id === assetId) ?? null;
+  }
+
+  async updateCatalogItem(ownerId: string, assetId: string, input: TrackEdit): Promise<CatalogItem> {
+    const asset = this.#assets.get(assetId);
+    if (!asset || asset.ownerId !== ownerId) throw new AbyError('asset_not_found', 'Asset not found', 404);
+    asset.canonicalMetadata = {
+      ...asset.canonicalMetadata,
+      title: input.workTitle,
+      recordingTitle: input.recordingTitle,
+      ...(input.albumTitle ? { albumTitle: input.albumTitle } : { albumTitle: undefined }),
+      ...(input.trackNumber ? { trackNumber: input.trackNumber } : { trackNumber: undefined }),
+      ...(input.creator ? { creator: input.creator } : { creator: undefined }),
+      ...(input.date ? { date: input.date } : { date: undefined }),
+      ...(input.releaseDate ? { releaseDate: input.releaseDate } : { releaseDate: undefined }),
+      ...(input.label ? { label: input.label } : { label: undefined }),
+      ...(input.catalogNumber ? { catalogNumber: input.catalogNumber } : { catalogNumber: undefined })
+    };
+    return (await this.getCatalogItem(ownerId, assetId))!;
+  }
+
+  async softDeleteAsset(ownerId: string, assetId: string): Promise<void> {
+    const asset = this.#assets.get(assetId);
+    if (!asset || asset.ownerId !== ownerId) throw new AbyError('asset_not_found', 'Asset not found', 404);
+    this.#assets.delete(assetId);
+  }
+
+  async getConversionSettings(ownerId: string): Promise<ConversionSettings> {
+    return structuredClone(this.#settings.get(ownerId) ?? { container: 'ogg', codec: 'libvorbis', quality: 6 });
+  }
+
+  async saveConversionSettings(ownerId: string, settings: ConversionSettings): Promise<ConversionSettings> {
+    this.#settings.set(ownerId, structuredClone(settings));
+    return structuredClone(settings);
+  }
+
+  async mergeCanonicalMetadata(ownerId: string, assetId: string, metadata: Record<string, unknown>): Promise<CatalogItem> {
+    const asset = this.#assets.get(assetId);
+    if (!asset || asset.ownerId !== ownerId) throw new AbyError('asset_not_found', 'Asset not found', 404);
+    asset.canonicalMetadata = { ...asset.canonicalMetadata, ...metadata };
+    return (await this.getCatalogItem(ownerId, assetId))!;
+  }
+
   async createSegment(ownerId: string, input: SegmentCreate, provenance: Provenance): Promise<Segment> {
     if (!await this.getAsset(ownerId, input.assetId)) throw new AbyError('asset_not_found', 'Asset not found', 404);
     const segment: Segment = { id: randomUUID(), ownerId, ...input, provenance, state: 'accepted', createdAt: new Date().toISOString() };
@@ -238,6 +298,7 @@ export class MemoryAbyRepository implements AbyRepository {
 function mapAsset(row: any): Asset {
   return {
     id: row.id, ownerId: row.owner_id, workId: row.work_id, recordingId: row.recording_id,
+    ...(row.album_id ? { albumId: row.album_id } : {}),
     provider: row.provider, ...(row.bucket ? { bucket: row.bucket } : {}), objectKey: row.object_key,
     originalFilename: row.original_filename, checksumSha256: row.checksum_sha256,
     technicalMetadata: row.technical_metadata, canonicalMetadata: row.canonical_metadata,
@@ -315,33 +376,32 @@ export class PostgresAbyRepository implements AbyRepository {
         'UPDATE aby.ingest_candidates SET object_key=$1,provenance=$2,candidate_metadata=COALESCE($3, candidate_metadata),updated_at=now() WHERE id=$4 RETURNING *',
         [targetObjectKey, provenance, updatedCandidateMetadata ?? null, previewId]
       );
-      const retirementProvenance: Provenance = {
-        method: 'human',
-        source: `promotion:${previewId}`,
-        actorId: ownerId,
-        parameters: {
-          sourceObjectKey,
-          canonicalObjectKey: targetObjectKey,
-          reason: 'canonical-copy-verified'
-        },
-        timestamp: new Date().toISOString(),
-        sourceAssetChecksum: row.checksum_sha256,
-        reviewState: 'candidate'
-      };
-      await client.query(
-        `INSERT INTO aby.source_retirement_candidates
-         (id,owner_id,preview_id,provider,bucket,source_object_key,canonical_object_key,checksum_sha256,state,provenance)
-         VALUES($1,$2,$3,$4,$5,$6,$7,$8,'candidate',$9)
-         ON CONFLICT(provider,bucket,source_object_key) DO UPDATE SET
-           owner_id=excluded.owner_id,
-           preview_id=excluded.preview_id,
-           canonical_object_key=excluded.canonical_object_key,
-           checksum_sha256=excluded.checksum_sha256,
-           state=CASE WHEN aby.source_retirement_candidates.state='retired' THEN 'retired' ELSE 'candidate' END,
-           provenance=excluded.provenance,
-           updated_at=now()`,
-        [randomUUID(), ownerId, previewId, row.provider, row.bucket, sourceObjectKey, targetObjectKey, row.checksum_sha256, retirementProvenance]
-      );
+      const retirementTracks = row.candidate_metadata.tracks?.length
+        ? row.candidate_metadata.tracks
+        : [{ objectKey: sourceObjectKey, canonicalObjectKey: targetObjectKey, checksumSha256: row.checksum_sha256 }];
+      for (const track of retirementTracks) {
+        const retirementProvenance: Provenance = {
+          method: 'human', source: `promotion:${previewId}`, actorId: ownerId,
+          parameters: {
+            sourceObjectKey: track.objectKey,
+            canonicalObjectKey: track.canonicalObjectKey,
+            reason: 'canonical-copy-verified'
+          },
+          timestamp: new Date().toISOString(), sourceAssetChecksum: track.checksumSha256,
+          reviewState: 'candidate'
+        };
+        await client.query(
+          `INSERT INTO aby.source_retirement_candidates
+           (id,owner_id,preview_id,provider,bucket,source_object_key,canonical_object_key,checksum_sha256,state,provenance)
+           VALUES($1,$2,$3,$4,$5,$6,$7,$8,'candidate',$9)
+           ON CONFLICT(provider,bucket,source_object_key) DO UPDATE SET
+             owner_id=excluded.owner_id,preview_id=excluded.preview_id,
+             canonical_object_key=excluded.canonical_object_key,checksum_sha256=excluded.checksum_sha256,
+             state=CASE WHEN aby.source_retirement_candidates.state='retired' THEN 'retired' ELSE 'candidate' END,
+             provenance=excluded.provenance,updated_at=now()`,
+          [randomUUID(), ownerId, previewId, row.provider, row.bucket, track.objectKey, track.canonicalObjectKey, track.checksumSha256, retirementProvenance]
+        );
+      }
       await client.query('COMMIT');
       return mapPreview(updated.rows[0]);
     } catch (error) {
@@ -357,6 +417,7 @@ export class PostgresAbyRepository implements AbyRepository {
     previewId: string,
     workTitle: string,
     recordingTitle: string,
+    albumTitle?: string,
     creator?: string,
     date?: string,
     releaseDate?: string,
@@ -374,7 +435,7 @@ export class PostgresAbyRepository implements AbyRepository {
           throw new AbyError('committed_asset_missing', 'Committed preview no longer points to an asset', 409);
         }
         const existing = await client.query(
-          `SELECT a.*, r.work_id FROM aby.assets a JOIN aby.recordings r ON r.id=a.recording_id
+          `SELECT a.*, r.work_id, r.album_id FROM aby.assets a JOIN aby.recordings r ON r.id=a.recording_id
            WHERE a.id=$1 AND a.owner_id=$2`, [preview.committed_asset_id, ownerId]
         );
         if (!existing.rows[0]) throw new AbyError('committed_asset_missing', 'Committed preview asset no longer exists', 409);
@@ -388,6 +449,8 @@ export class PostgresAbyRepository implements AbyRepository {
 
       const now = new Date().toISOString();
       const workId = randomUUID();
+      const finalAlbumTitle = albumTitle !== undefined ? albumTitle.trim() || undefined : preview.candidate_metadata.albumTitle;
+      const albumId = finalAlbumTitle ? randomUUID() : undefined;
       const provenance = accepted({ ...preview.provenance, jobId: preview.id }, ownerId);
       
       const tracks = preview.candidate_metadata.tracks || [{
@@ -395,7 +458,8 @@ export class PostgresAbyRepository implements AbyRepository {
         originalFilename: preview.original_filename,
         checksumSha256: preview.checksum_sha256,
         technicalMetadata: preview.technical_metadata,
-        recordingTitle: recordingTitle
+        recordingTitle: recordingTitle,
+        trackNumber: preview.candidate_metadata.trackNumber
       }];
 
       const finalCreator = creator !== undefined ? creator : preview.candidate_metadata.creator;
@@ -418,8 +482,20 @@ export class PostgresAbyRepository implements AbyRepository {
       // 1. Insert unified Work with composition date in metadata
       const workMetadata = { date: finalDate };
       await client.query('INSERT INTO aby.works(id,owner_id,title,metadata,provenance) VALUES($1,$2,$3,$4,$5)', [workId, ownerId, workTitle, workMetadata, provenance]);
+      if (albumId && finalAlbumTitle) {
+        await client.query(
+          'INSERT INTO aby.albums(id,owner_id,work_id,title,metadata,provenance) VALUES($1,$2,$3,$4,$5,$6)',
+          [albumId, ownerId, workId, finalAlbumTitle, {
+            releaseDate: finalReleaseDate,
+            label: finalLabel,
+            catalogNumber: finalCatalogNumber,
+            imageCandidates: preview.candidate_metadata.imageCandidates
+          }, provenance]
+        );
+      }
 
       let mainAssetId = '';
+      let firstAssetId = '';
       let mainAsset: Asset | undefined;
 
       // 2. Insert all tracks
@@ -428,7 +504,7 @@ export class PostgresAbyRepository implements AbyRepository {
         const assetId = randomUUID();
 
         const duplicate = await client.query(
-          `SELECT a.*,r.work_id,r.title AS existing_recording_title,w.title AS existing_work_title FROM aby.assets a
+          `SELECT a.*,r.work_id,r.album_id,r.title AS existing_recording_title,w.title AS existing_work_title FROM aby.assets a
            JOIN aby.recordings r ON r.id=a.recording_id
            JOIN aby.works w ON w.id=r.work_id
            WHERE a.owner_id=$1 AND a.provider=$2 AND a.bucket IS NOT DISTINCT FROM $3 AND a.object_key=$4
@@ -465,6 +541,8 @@ export class PostgresAbyRepository implements AbyRepository {
           ...preview.candidate_metadata, 
           title: workTitle, 
           recordingTitle: track.recordingTitle,
+          albumTitle: finalAlbumTitle,
+          trackNumber: track.trackNumber,
           creator: finalCreator,
           date: finalDate,
           releaseDate: finalReleaseDate,
@@ -477,19 +555,20 @@ export class PostgresAbyRepository implements AbyRepository {
           releaseDate: finalReleaseDate,
           label: finalLabel,
           catalogNumber: finalCatalogNumber,
+          trackNumber: track.trackNumber,
           identificationCandidates: preview.candidate_metadata.identificationCandidates
         };
 
         await client.query(
-          'INSERT INTO aby.recordings(id,owner_id,work_id,title,metadata,provenance) VALUES($1,$2,$3,$4,$5,$6)',
-          [recordingId, ownerId, workId, track.recordingTitle, recordingMetadata, provenance]
+          'INSERT INTO aby.recordings(id,owner_id,work_id,album_id,title,metadata,provenance) VALUES($1,$2,$3,$4,$5,$6,$7)',
+          [recordingId, ownerId, workId, albumId ?? null, track.recordingTitle, recordingMetadata, provenance]
         );
 
-        const originalObjectKey = typeof preview.provenance.parameters?.sourceObjectKey === 'string'
+        const originalObjectKey = track.sourceObjectKey ?? (typeof preview.provenance.parameters?.sourceObjectKey === 'string'
           ? (preview.provenance.parameters.sourceObjectKey === preview.object_key
               ? track.objectKey
               : preview.provenance.parameters.sourceObjectKey)
-          : track.objectKey;
+          : track.objectKey);
 
         await client.query(
           `INSERT INTO aby.assets
@@ -500,11 +579,12 @@ export class PostgresAbyRepository implements AbyRepository {
         );
 
         const createdAsset = {
-          id: assetId, ownerId, workId, recordingId, provider: preview.provider,
+          id: assetId, ownerId, workId, recordingId, ...(albumId ? { albumId } : {}), provider: preview.provider,
           ...(preview.bucket ? { bucket: preview.bucket } : {}), objectKey: track.objectKey,
           originalFilename: track.originalFilename, checksumSha256: track.checksumSha256,
           technicalMetadata: track.technicalMetadata, canonicalMetadata, provenance, createdAt: now
         };
+        if (!firstAssetId) firstAssetId = assetId;
 
         if (track.objectKey === preview.object_key || track.objectKey === preview.candidate_metadata.canonicalObjectKey) {
           mainAsset = createdAsset;
@@ -512,12 +592,12 @@ export class PostgresAbyRepository implements AbyRepository {
         }
       }
 
-      const finalAssetId = mainAssetId || (tracks[0] ? tracks[0].id : '');
+      const finalAssetId = mainAssetId || firstAssetId;
       await client.query("UPDATE aby.ingest_candidates SET status='committed',committed_asset_id=$1,updated_at=now() WHERE id=$2", [finalAssetId, previewId]);
       await client.query('COMMIT');
 
       if (mainAsset) return mainAsset;
-      const finalAsset = await client.query(`SELECT a.*, r.work_id FROM aby.assets a JOIN aby.recordings r ON r.id=a.recording_id WHERE a.id=$1`, [finalAssetId]);
+      const finalAsset = await client.query(`SELECT a.*, r.work_id, r.album_id FROM aby.assets a JOIN aby.recordings r ON r.id=a.recording_id WHERE a.id=$1`, [finalAssetId]);
       return mapAsset(finalAsset.rows[0]);
     } catch (error) {
       await client.query('ROLLBACK');
@@ -529,7 +609,7 @@ export class PostgresAbyRepository implements AbyRepository {
 
   async getAsset(ownerId: string, assetId: string): Promise<Asset | null> {
     const result = await this.#pool.query(
-      `SELECT a.*, r.work_id FROM aby.assets a JOIN aby.recordings r ON r.id=a.recording_id
+      `SELECT a.*, r.work_id, r.album_id FROM aby.assets a JOIN aby.recordings r ON r.id=a.recording_id
        WHERE a.id=$1 AND a.owner_id=$2`, [assetId, ownerId]
     );
     return result.rows[0] ? mapAsset(result.rows[0]) : null;
@@ -611,7 +691,8 @@ export class PostgresAbyRepository implements AbyRepository {
 
   async listCatalog(ownerId: string): Promise<CatalogItem[]> {
     const result = await this.#pool.query(
-      `SELECT a.*,r.title AS recording_title,r.work_id,w.title AS work_title,
+      `SELECT a.*,r.title AS recording_title,r.work_id,r.album_id,r.metadata AS recording_metadata,
+        w.title AS work_title,al.title AS album_title,
         COALESCE(jsonb_agg(jsonb_build_object(
           'id',s.id,
           'startTimeMs',s.start_time_ms,
@@ -622,10 +703,11 @@ export class PostgresAbyRepository implements AbyRepository {
        FROM aby.assets a
        JOIN aby.recordings r ON r.id=a.recording_id
        JOIN aby.works w ON w.id=r.work_id
+       LEFT JOIN aby.albums al ON al.id=r.album_id
        LEFT JOIN aby.segments s ON s.asset_id=a.id AND s.owner_id=a.owner_id
        WHERE a.owner_id=$1 AND a.state='active'
-       GROUP BY a.id,r.title,r.work_id,w.title
-       ORDER BY lower(w.title),a.created_at`,
+       GROUP BY a.id,r.title,r.work_id,r.album_id,r.metadata,w.title,al.title
+       ORDER BY lower(w.title),lower(COALESCE(al.title,'')),COALESCE((r.metadata->>'trackNumber')::int,2147483647),a.created_at`,
       [ownerId]
     );
     return result.rows.map((row) => {
@@ -635,6 +717,9 @@ export class PostgresAbyRepository implements AbyRepository {
         asset,
         workTitle: row.work_title,
         recordingTitle: row.recording_title,
+        ...(row.album_id ? { albumId: row.album_id } : {}),
+        ...(row.album_title ? { albumTitle: row.album_title } : {}),
+        ...(row.recording_metadata?.trackNumber ? { trackNumber: Number(row.recording_metadata.trackNumber) } : {}),
         ...(asset.canonicalMetadata.creator ? { creator: asset.canonicalMetadata.creator } : {}),
         ...(imageCandidate?.url ? { coverUrl: imageCandidate.url } : {}),
         ...(asset.canonicalMetadata.releaseDate ? { releaseDate: asset.canonicalMetadata.releaseDate } : {}),
@@ -648,6 +733,107 @@ export class PostgresAbyRepository implements AbyRepository {
         }))
       };
     });
+  }
+
+  async getCatalogItem(ownerId: string, assetId: string): Promise<CatalogItem | null> {
+    return (await this.listCatalog(ownerId)).find((item) => item.asset.id === assetId) ?? null;
+  }
+
+  async updateCatalogItem(ownerId: string, assetId: string, input: TrackEdit): Promise<CatalogItem> {
+    const client = await this.#pool.connect();
+    try {
+      await client.query('BEGIN');
+      const found = await client.query(
+        `SELECT a.canonical_metadata,r.id AS recording_id,r.work_id,r.album_id,r.metadata AS recording_metadata,
+                w.provenance AS work_provenance,r.provenance AS recording_provenance
+         FROM aby.assets a JOIN aby.recordings r ON r.id=a.recording_id JOIN aby.works w ON w.id=r.work_id
+         WHERE a.id=$1 AND a.owner_id=$2 FOR UPDATE`,
+        [assetId, ownerId]
+      );
+      const row = found.rows[0];
+      if (!row) throw new AbyError('asset_not_found', 'Asset not found', 404);
+
+      await client.query('UPDATE aby.works SET title=$1,updated_at=now() WHERE id=$2 AND owner_id=$3', [input.workTitle, row.work_id, ownerId]);
+
+      let albumId: string | null = row.album_id;
+      const albumTitle = input.albumTitle?.trim() || null;
+      if (!albumTitle) {
+        albumId = null;
+      } else if (albumId) {
+        await client.query('UPDATE aby.albums SET title=$1,updated_at=now() WHERE id=$2 AND owner_id=$3', [albumTitle, albumId, ownerId]);
+      } else {
+        albumId = randomUUID();
+        await client.query(
+          'INSERT INTO aby.albums(id,owner_id,work_id,title,metadata,provenance) VALUES($1,$2,$3,$4,$5,$6)',
+          [albumId, ownerId, row.work_id, albumTitle, {}, accepted(row.recording_provenance, ownerId)]
+        );
+      }
+
+      const recordingMetadata = {
+        ...row.recording_metadata,
+        trackNumber: input.trackNumber ?? undefined,
+        releaseDate: input.releaseDate ?? undefined,
+        label: input.label ?? undefined,
+        catalogNumber: input.catalogNumber ?? undefined
+      };
+      const canonicalMetadata = {
+        ...row.canonical_metadata,
+        title: input.workTitle,
+        recordingTitle: input.recordingTitle,
+        albumTitle: albumTitle ?? undefined,
+        trackNumber: input.trackNumber ?? undefined,
+        creator: input.creator ?? undefined,
+        date: input.date ?? undefined,
+        releaseDate: input.releaseDate ?? undefined,
+        label: input.label ?? undefined,
+        catalogNumber: input.catalogNumber ?? undefined
+      };
+      await client.query(
+        'UPDATE aby.recordings SET album_id=$1,title=$2,metadata=$3,updated_at=now() WHERE id=$4 AND owner_id=$5',
+        [albumId, input.recordingTitle, recordingMetadata, row.recording_id, ownerId]
+      );
+      await client.query('UPDATE aby.assets SET canonical_metadata=$1,updated_at=now() WHERE id=$2 AND owner_id=$3', [canonicalMetadata, assetId, ownerId]);
+      await client.query('COMMIT');
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+    return (await this.getCatalogItem(ownerId, assetId))!;
+  }
+
+  async softDeleteAsset(ownerId: string, assetId: string): Promise<void> {
+    const result = await this.#pool.query(
+      "UPDATE aby.assets SET state='deleted',updated_at=now() WHERE id=$1 AND owner_id=$2 AND state='active' RETURNING id",
+      [assetId, ownerId]
+    );
+    if (!result.rows[0]) throw new AbyError('asset_not_found', 'Asset not found', 404);
+  }
+
+  async getConversionSettings(ownerId: string): Promise<ConversionSettings> {
+    const result = await this.#pool.query('SELECT conversion FROM aby.user_settings WHERE owner_id=$1', [ownerId]);
+    return result.rows[0]?.conversion ?? { container: 'ogg', codec: 'libvorbis', quality: 6 };
+  }
+
+  async saveConversionSettings(ownerId: string, settings: ConversionSettings): Promise<ConversionSettings> {
+    const result = await this.#pool.query(
+      `INSERT INTO aby.user_settings(owner_id,conversion) VALUES($1,$2)
+       ON CONFLICT(owner_id) DO UPDATE SET conversion=excluded.conversion,updated_at=now()
+       RETURNING conversion`,
+      [ownerId, settings]
+    );
+    return result.rows[0].conversion;
+  }
+
+  async mergeCanonicalMetadata(ownerId: string, assetId: string, metadata: Record<string, unknown>): Promise<CatalogItem> {
+    const result = await this.#pool.query(
+      `UPDATE aby.assets SET canonical_metadata=canonical_metadata || $1::jsonb,updated_at=now()
+       WHERE id=$2 AND owner_id=$3 AND state='active' RETURNING id`,
+      [metadata, assetId, ownerId]
+    );
+    if (!result.rows[0]) throw new AbyError('asset_not_found', 'Asset not found', 404);
+    return (await this.getCatalogItem(ownerId, assetId))!;
   }
 
   async createSegment(ownerId: string, input: SegmentCreate, provenance: Provenance): Promise<Segment> {

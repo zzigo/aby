@@ -12,6 +12,7 @@
   let segment = $state<Segment | null>(null);
   let workTitle = $state('');
   let recordingTitle = $state('');
+  let albumTitle = $state('');
   let creator = $state('');
   let date = $state('');
   let releaseDate = $state('');
@@ -22,17 +23,43 @@
   let status = $state('Ready for one bounded inspection.');
   let busy = $state(false);
   let autoSeparation = $state(true);
+  let conversionCodec = $state<'libvorbis' | 'libopus'>('libvorbis');
+  let conversionQuality = $state(6);
+  let setupMessage = $state('');
   let requiresPromotion = $derived(Boolean(preview?.candidateMetadata.canonicalObjectKey && preview.candidateMetadata.canonicalObjectKey !== preview.objectKey));
 
-  onMount(() => {
+  onMount(async () => {
     const userId = data.user?.id ?? 'anonymous';
     autoSeparation = localStorage.getItem(`aby.config.auto-separation:${userId}`) !== 'false';
+    if (data.user) {
+      try {
+        const response = await fetch('/api/settings');
+        const body = await response.json();
+        if (response.ok) {
+          conversionCodec = body.conversion.codec;
+          conversionQuality = body.conversion.quality;
+        }
+      } catch { /* setup keeps its documented defaults */ }
+    }
   });
 
   function toggleAutoSeparation() {
     autoSeparation = !autoSeparation;
     const userId = data.user?.id ?? 'anonymous';
     localStorage.setItem(`aby.config.auto-separation:${userId}`, String(autoSeparation));
+  }
+
+  async function saveSetup() {
+    setupMessage = 'Saving…';
+    try {
+      const response = await fetch('/api/settings', {
+        method: 'PATCH', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ container: 'ogg', codec: conversionCodec, quality: conversionQuality })
+      });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error?.message ?? 'Setup could not be saved');
+      setupMessage = 'Saved';
+    } catch (error) { setupMessage = error instanceof Error ? error.message : 'Setup could not be saved'; }
   }
 
   async function request(path: string, body: unknown) {
@@ -80,6 +107,7 @@
       preview = result.preview;
       workTitle = preview!.candidateMetadata.title;
       recordingTitle = preview!.candidateMetadata.recordingTitle;
+      albumTitle = preview!.candidateMetadata.albumTitle || '';
       creator = preview!.candidateMetadata.creator || '';
       date = preview!.candidateMetadata.date || '';
       releaseDate = preview!.candidateMetadata.releaseDate || '';
@@ -154,6 +182,7 @@
       preview = result.preview;
       workTitle = preview!.candidateMetadata.title;
       recordingTitle = preview!.candidateMetadata.recordingTitle;
+      albumTitle = preview!.candidateMetadata.albumTitle || '';
       creator = preview!.candidateMetadata.creator || '';
       date = preview!.candidateMetadata.date || '';
       releaseDate = preview!.candidateMetadata.releaseDate || '';
@@ -177,6 +206,7 @@
         previewId: preview.id,
         workTitle,
         recordingTitle,
+        albumTitle,
         creator,
         date,
         releaseDate,
@@ -262,12 +292,6 @@
       <p>Aby keeps the original file untouched, separates machine candidates from canonical metadata, and treats segments as temporal references before they become files.</p>
       {#if data.user}
         <div class="identity"><span>{data.user.name || data.user.email || 'Logto user'}</span><small>Shared Logto identity</small><form method="POST" action="?/signOut"><button class="secondary">Sign out</button></form></div>
-        <div class="config-panel" style="margin-top: 12px; padding: 12px; border: 1px solid var(--line); background: var(--surface); display: flex; align-items: center; justify-content: space-between; font-size: 13px;">
-          <span style="color: var(--muted);">Separación automática (BS-Roformer)</span>
-          <button class="config-toggle" class:active={autoSeparation} onclick={toggleAutoSeparation} style="padding: 6px 12px; font-size: 11px; font-family: ui-monospace, monospace; border: 1px solid var(--line); background: {autoSeparation ? 'var(--signal)' : 'transparent'}; color: {autoSeparation ? '#101110' : '#fff'}; font-weight: {autoSeparation ? '700' : '400'}; transition: 0.15s;">
-            {autoSeparation ? 'ACTIVADA' : 'DESACTIVADA'}
-          </button>
-        </div>
       {:else}
         <form method="POST" action="?/signIn"><button class="primary">Continue with Logto</button></form>
       {/if}
@@ -324,8 +348,9 @@
     <article class:complete={Boolean(asset)}>
       <header><span>02</span><h2>Confirm</h2></header>
       {#if preview}
-        <label>Work/Album title<input bind:value={workTitle} /></label>
-        <label>Recording/Track title<input bind:value={recordingTitle} /></label>
+        <label>Work title<input bind:value={workTitle} /></label>
+        <label>Album (optional)<input bind:value={albumTitle} placeholder="Direct track when empty" /></label>
+        <label>Track title<input bind:value={recordingTitle} /></label>
         <label>Artist/s<input bind:value={creator} /></label>
         <div style="display: flex; gap: 12px; margin-bottom: 12px;">
           <label style="flex: 1; margin: 0;">Year (Composition)<input bind:value={date} style="width: 100%; box-sizing: border-box;" /></label>
@@ -338,16 +363,16 @@
         {#if preview.candidateMetadata.tracks && preview.candidateMetadata.tracks.length > 1}
           <div style="margin-top: 14px; margin-bottom: 14px; border: 1px solid var(--line); padding: 12px; background: #131412;">
             <header style="font-size: 11px; font-weight: 600; text-transform: uppercase; color: var(--signal); margin-bottom: 6px; letter-spacing: 0.05em;">
-              Complete Album Detected ({preview.candidateMetadata.tracks.length} tracks)
+              Album folder detected ({preview.candidateMetadata.tracks.length} tracks)
             </header>
             <p style="font-size: 11px; color: var(--muted); margin: 0 0 10px 0; line-height: 1.4;">
-              Committing will catalog all sibling files in this folder under the same Work.
+              Tracks remain under the same Work and optional Album.
             </p>
             <div style="max-height: 150px; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; padding-right: 4px;">
               {#each preview.candidateMetadata.tracks as track (track.objectKey)}
                 <div style="font-size: 10px; font-family: ui-monospace, monospace; border-bottom: 1px dashed #20221f; padding: 4px 0; display: flex; justify-content: space-between; gap: 8px;">
                   <span style="color: #fff; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 60%;" title={track.originalFilename}>
-                    {track.originalFilename}
+                    {track.trackNumber ? `${String(track.trackNumber).padStart(2, '0')} · ` : ''}{track.originalFilename}
                   </span>
                   <span style="color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 40%; text-align: right;">
                     {track.recordingTitle}
@@ -434,6 +459,20 @@
       </dl>
     {/if}
   </section>
+
+  {#if data.user}
+    <section class="setup-section" aria-label="Setup">
+      <header><span>SETUP</span><h2>Processing defaults</h2></header>
+      <div class="setup-grid">
+        <div><strong>Source separation</strong><small>BS-Roformer</small></div>
+        <button class:active={autoSeparation} onclick={toggleAutoSeparation}>{autoSeparation ? 'ON' : 'OFF'}</button>
+        <label>Ogg codec<select bind:value={conversionCodec}><option value="libvorbis">Vorbis</option><option value="libopus">Opus</option></select></label>
+        <label>Quality {conversionQuality}<input type="range" min="0" max="10" step="1" bind:value={conversionQuality} /></label>
+        <button class="save-setup" onclick={saveSetup}>Save conversion</button>
+        <small class="setup-message">{setupMessage}</small>
+      </div>
+    </section>
+  {/if}
 </main>
 
 <style>
@@ -456,4 +495,10 @@
     background-color: rgba(198, 255, 82, 0.08);
     outline: none;
   }
+  .setup-section{margin-top:72px;border:1px solid var(--line);background:var(--surface)}
+  .setup-section>header{display:flex;gap:18px;align-items:baseline;padding:18px 22px;border-bottom:1px solid var(--line)}
+  .setup-section>header span{font:10px ui-monospace,monospace;color:var(--signal)}.setup-section h2{margin:0;font-size:18px;font-weight:500}
+  .setup-grid{display:grid;grid-template-columns:1.2fr auto 1fr 1fr auto;gap:18px;align-items:end;padding:22px}.setup-grid>div{display:grid}.setup-grid small{color:var(--muted)}
+  .setup-grid label{display:grid;gap:7px;font:10px ui-monospace,monospace;color:var(--muted)}.setup-grid select{background:#111310;color:#fff;border:1px solid var(--line);padding:9px}.setup-grid button{border:1px solid var(--line);background:transparent;color:#fff;padding:9px 14px}.setup-grid button.active,.save-setup{background:var(--signal)!important;color:#101110!important}.setup-message{align-self:center}
+  @media(max-width:760px){.setup-grid{grid-template-columns:1fr auto}.setup-grid label{grid-column:span 2}.save-setup{grid-column:span 2}}
 </style>
