@@ -18,7 +18,7 @@ describe('Discogs album metadata', () => {
         title: 'Sind',
         year: 2007,
         artists_sort: 'Axel Dörner',
-        uri: '/release/1229980-Axel-Dörner-Sind',
+        uri: 'https://www.discogs.com/release/1229980-Axel-Dörner-Sind',
         labels: [{ name: 'absinthRecords', catno: 'absinthRecords 010' }],
         images: [{ type: 'primary', uri: 'https://i.discogs.com/sind.jpeg' }]
       });

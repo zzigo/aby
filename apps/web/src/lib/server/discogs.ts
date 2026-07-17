@@ -100,6 +100,7 @@ export async function searchDiscogsRelease(
   const release = await discogsJson<DiscogsReleaseDocument>(fetcher, releaseUrl);
   const label = release.labels?.[0];
   const cover = release.images?.find((image) => image.type === 'primary') ?? release.images?.[0];
+  const releasePath = release.uri || selected.uri;
   return {
     id: String(release.id),
     title: release.title || albumTitle,
@@ -108,10 +109,8 @@ export async function searchDiscogsRelease(
     ...(label?.name || selected.label?.[0] ? { label: label?.name || selected.label?.[0] } : {}),
     ...(label?.catno || selected.catno ? { catalogNumber: label?.catno || selected.catno } : {}),
     ...(cover?.uri || selected.cover_image ? { coverUrl: (cover?.uri || selected.cover_image)!.replace(/^http:/, 'https:') } : {}),
-    canonicalUrl: release.uri
-      ? `https://www.discogs.com${release.uri}`
-      : selected.uri
-        ? `https://www.discogs.com${selected.uri}`
-        : `https://www.discogs.com/release/${release.id}`
+    canonicalUrl: releasePath
+      ? /^https?:\/\//i.test(releasePath) ? releasePath : new URL(releasePath, 'https://www.discogs.com').toString()
+      : `https://www.discogs.com/release/${release.id}`
   };
 }
