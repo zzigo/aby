@@ -65,4 +65,4 @@ aby/
 
 The operational root is `/opt/apps/aby`, owned by `zz`. Aby reserves loopback port `4332`, immediately after Seshat's `4331`. PostgreSQL and Qdrant remain shared infrastructure but Aby receives a dedicated database role/database and namespaced schema/collections. `scripts/tunnel-vps.sh` forwards app, database and Qdrant ports without exposing them on public interfaces.
 
-PM2 process `aby-web` runs the production build on `127.0.0.1:4332`. Caddy has a validated `aby.zztt.org` reverse proxy and a pre-change backup at `/etc/caddy/Caddyfile.before-aby-20260717`. Public TLS is pending because Cloudflare DNS lacks the `aby` record and the available API token returned HTTP 403 without making a change.
+PM2 process `aby-web` runs the production build on `127.0.0.1:4332`. Caddy has a validated `aby.zztt.org` reverse proxy and a pre-change backup at `/etc/caddy/Caddyfile.before-aby-20260717`. Cloudflare serves an unproxied A record to `46.225.154.68`; Caddy issued a valid certificate and the public health endpoint returns HTTP 200.

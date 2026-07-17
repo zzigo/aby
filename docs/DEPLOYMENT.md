@@ -34,6 +34,6 @@ The command uses the `hetzner` SSH host alias and `ExitOnForwardFailure`; all re
 6. Verify `curl -fsS http://127.0.0.1:4332/api/health`.
 7. Validate Caddy before any reload.
 
-## Pending public DNS
+## Public endpoint
 
-Create an unproxied Cloudflare A record `aby.zztt.org -> 46.225.154.68`. Caddy is already configured and will obtain TLS once public DNS resolves. The token available during the initial deployment returned Cloudflare API error 10000/HTTP 403, so no DNS mutation occurred.
+Cloudflare has an unproxied A record `aby.zztt.org -> 46.225.154.68`. Caddy manages the public certificate and proxies `https://aby.zztt.org` to the loopback application. Verification requires both a valid TLS chain and `status: ok` from `https://aby.zztt.org/api/health`.
