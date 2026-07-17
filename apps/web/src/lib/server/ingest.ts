@@ -11,7 +11,7 @@ import { recordingFolderName } from './catalog-path';
 import { identifyWithMusicBrainz } from './musicbrainz';
 import { fetchWikidataEntity } from './wikidata';
 import type { AbyRepository } from './repository';
-import { assertSourceObjectKey, downloadWasabiSourceObject, headWasabiSourceObject, normalizeObjectKey } from './storage';
+import { assertSourceObjectKey, downloadWasabiSourceObject, headWasabiSourceObject, normalizeObjectKey, listWasabiSiblingKeys } from './storage';
 
 function pathSegment(value: string): string {
   const segment = value.normalize('NFC').replace(/\p{Cc}/gu, '').replaceAll('/', '／').trim();
@@ -19,8 +19,13 @@ function pathSegment(value: string): string {
   return segment;
 }
 
-function assetFilename(workTitle: string, originalFilename: string): string {
-  return `${pathSegment(workTitle)}${extname(originalFilename).toLowerCase()}`;
+function assetFilename(workTitle: string, originalFilename: string, isAlbum: boolean = false): string {
+  if (!isAlbum) {
+    return `${pathSegment(workTitle)}${extname(originalFilename).toLowerCase()}`;
+  }
+  const ext = extname(originalFilename).toLowerCase();
+  const base = basename(originalFilename, extname(originalFilename));
+  return `${pathSegment(base)}${ext}`;
 }
 
 export async function inspectFixture(ownerId: string, repository: AbyRepository): Promise<IngestPreview> {
@@ -59,17 +64,23 @@ export async function inspectWasabiSource(
   if (!sourceObjectKey.startsWith(expectedSourcePrefix)) {
     throw new AbyError('source_media_mismatch', `${input.mediaKind} sources must remain below ${expectedSourcePrefix}`, 400);
   }
-  const head = await headWasabiSourceObject(sourceObjectKey);
-  if (!head.sizeBytes || head.sizeBytes > config.ABY_INGEST_MAX_SOURCE_BYTES) {
-    throw new AbyError('source_size_out_of_bounds', `Source must be between 1 and ${config.ABY_INGEST_MAX_SOURCE_BYTES} bytes`, 413);
-  }
+
+  // Find all sibling tracks in the same folder to represent the complete album!
+  const siblingKeys = await listWasabiSiblingKeys(sourceObjectKey);
+
   const directory = await mkdtemp(join(tmpdir(), 'aby-source-preview-'));
-  const localPath = join(directory, `source${extname(sourceObjectKey).toLowerCase()}`);
   try {
-    await downloadWasabiSourceObject(sourceObjectKey, localPath);
-    const inspected = await inspectLocalAsset(localPath, { binary: config.FFPROBE_PATH, timeoutMs: config.FFPROBE_TIMEOUT_MS });
+    // 1. Inspect the main requested file first
+    const mainHead = await headWasabiSourceObject(sourceObjectKey);
+    if (!mainHead.sizeBytes || mainHead.sizeBytes > config.ABY_INGEST_MAX_SOURCE_BYTES) {
+      throw new AbyError('source_size_out_of_bounds', `Source must be between 1 and ${config.ABY_INGEST_MAX_SOURCE_BYTES} bytes`, 413);
+    }
+    const mainLocalPath = join(directory, `main${extname(sourceObjectKey).toLowerCase()}`);
+    await downloadWasabiSourceObject(sourceObjectKey, mainLocalPath);
+    const mainInspected = await inspectLocalAsset(mainLocalPath, { binary: config.FFPROBE_PATH, timeoutMs: config.FFPROBE_TIMEOUT_MS });
+    
     const identification = input.mediaKind === 'aud'
-      ? await identifyWithMusicBrainz({ creator: input.creatorDisplay, workTitle: input.workTitle, durationMs: inspected.metadata.durationMs })
+      ? await identifyWithMusicBrainz({ creator: input.creatorDisplay, workTitle: input.workTitle, durationMs: mainInspected.metadata.durationMs })
       : null;
     const wikidata = input.creatorDisplay ? await fetchWikidataEntity(input.creatorDisplay) : null;
     const recordingTitle = input.recordingTitle || identification?.recordingTitle || input.workTitle;
@@ -79,14 +90,16 @@ export async function inspectWasabiSource(
       fallback: recordingTitle
     });
     const canonicalPrefix = input.mediaKind === 'aud' ? config.audioPrefix : config.videoPrefix;
+    
     const targetObjectKey = normalizeObjectKey([
       canonicalPrefix.replace(/\/$/, ''),
       input.collectionCode,
       input.entitySlug,
       pathSegment(input.workTitle),
       pathSegment(recordingFolder),
-      assetFilename(input.workTitle, basename(sourceObjectKey))
+      assetFilename(input.workTitle, basename(sourceObjectKey), siblingKeys.length > 1)
     ].join('/'));
+    
     const identificationCandidates = identification ? [{
       authority: 'musicbrainz',
       entityType: 'recording',
@@ -108,6 +121,7 @@ export async function inspectWasabiSource(
         catalogNumber: identification.catalogNumber
       }
     }] : [];
+    
     const imageCandidates = identification?.cover ? [{
       authority: 'cover-art-archive',
       url: identification.cover.url,
@@ -130,6 +144,51 @@ export async function inspectWasabiSource(
         source: 'wikidata-image-fallback'
       }
     }] : []);
+
+    // 2. Inspect all sibling files (tracks) in the album folder
+    const tracks = [];
+    for (const siblingKey of siblingKeys) {
+      let siblingInspected;
+      let siblingSizeBytes;
+      
+      if (siblingKey === sourceObjectKey) {
+        siblingInspected = mainInspected;
+        siblingSizeBytes = mainHead.sizeBytes;
+      } else {
+        const siblingHead = await headWasabiSourceObject(siblingKey);
+        siblingSizeBytes = siblingHead.sizeBytes;
+        
+        if (siblingSizeBytes && siblingSizeBytes <= config.ABY_INGEST_MAX_SOURCE_BYTES) {
+          const siblingLocalPath = join(directory, `${randomUUID()}${extname(siblingKey).toLowerCase()}`);
+          await downloadWasabiSourceObject(siblingKey, siblingLocalPath);
+          siblingInspected = await inspectLocalAsset(siblingLocalPath, { binary: config.FFPROBE_PATH, timeoutMs: config.FFPROBE_TIMEOUT_MS });
+        }
+      }
+      
+      if (siblingInspected) {
+        const nameWithoutExt = basename(siblingKey, extname(siblingKey));
+        const cleanedTitle = nameWithoutExt.replace(/^\d+[\s.\-_]+/, '').trim();
+        
+        const siblingTargetObjectKey = normalizeObjectKey([
+          canonicalPrefix.replace(/\/$/, ''),
+          input.collectionCode,
+          input.entitySlug,
+          pathSegment(input.workTitle),
+          pathSegment(recordingFolder),
+          assetFilename(input.workTitle, basename(siblingKey), siblingKeys.length > 1)
+        ].join('/'));
+
+        tracks.push({
+          objectKey: siblingKey,
+          canonicalObjectKey: siblingTargetObjectKey,
+          originalFilename: basename(siblingKey),
+          checksumSha256: siblingInspected.checksumSha256,
+          technicalMetadata: { ...siblingInspected.metadata, sizeBytes: siblingSizeBytes },
+          recordingTitle: cleanedTitle
+        });
+      }
+    }
+
     const preview: IngestPreview = {
       id: randomUUID(),
       ownerId,
@@ -138,8 +197,8 @@ export async function inspectWasabiSource(
       objectKey: sourceObjectKey,
       originalFilename: basename(sourceObjectKey),
       originalDirectory: dirname(sourceObjectKey),
-      checksumSha256: inspected.checksumSha256,
-      technicalMetadata: { ...inspected.metadata, sizeBytes: head.sizeBytes },
+      checksumSha256: mainInspected.checksumSha256,
+      technicalMetadata: { ...mainInspected.metadata, sizeBytes: mainHead.sizeBytes },
       candidateMetadata: {
         title: input.workTitle,
         recordingTitle,
@@ -153,14 +212,15 @@ export async function inspectWasabiSource(
         canonicalObjectKey: targetObjectKey,
         identificationCandidates,
         imageCandidates,
-        ...(wikidata ? { wikidata } : {})
+        ...(wikidata ? { wikidata } : {}),
+        tracks
       },
       provenance: {
         method: 'calculated',
         source: `wasabi:${config.wasabiRootPrefix}${sourceObjectKey}`,
         actorId: ownerId,
         tool: identification ? 'sha256 + ffprobe + MusicBrainz' : 'sha256 + ffprobe',
-        toolVersion: inspected.toolVersion,
+        toolVersion: mainInspected.toolVersion,
         parameters: {
           sourceObjectKey,
           proposedObjectKey: targetObjectKey,
@@ -168,7 +228,7 @@ export async function inspectWasabiSource(
           ffprobeTimeoutMs: config.FFPROBE_TIMEOUT_MS
         },
         timestamp: new Date().toISOString(),
-        sourceAssetChecksum: inspected.checksumSha256,
+        sourceAssetChecksum: mainInspected.checksumSha256,
         confidence: identification?.score,
         reviewState: 'candidate'
       },

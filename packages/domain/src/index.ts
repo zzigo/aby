@@ -78,7 +78,15 @@ export const CandidateMetadataSchema = z.object({
     description: z.string(),
     imageUrl: z.string().url().optional(),
     birthDate: z.string().optional()
-  }).optional()
+  }).optional(),
+  tracks: z.array(z.object({
+    objectKey: z.string(),
+    canonicalObjectKey: z.string(),
+    originalFilename: z.string(),
+    checksumSha256: z.string(),
+    technicalMetadata: TechnicalMetadataSchema,
+    recordingTitle: z.string()
+  })).optional()
 });
 export type CandidateMetadata = z.infer<typeof CandidateMetadataSchema>;
 

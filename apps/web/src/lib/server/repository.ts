@@ -27,7 +27,7 @@ export interface SpectrogramAnalysis {
 export interface AbyRepository {
   savePreview(preview: IngestPreview): Promise<IngestPreview>;
   getPreview(ownerId: string, previewId: string): Promise<IngestPreview | null>;
-  markPreviewPromoted(ownerId: string, previewId: string, sourceObjectKey: string, targetObjectKey: string): Promise<IngestPreview>;
+  markPreviewPromoted(ownerId: string, previewId: string, sourceObjectKey: string, targetObjectKey: string, updatedCandidateMetadata?: any): Promise<IngestPreview>;
   commitPreview(ownerId: string, previewId: string, workTitle: string, recordingTitle: string): Promise<Asset>;
   listCatalog(ownerId: string): Promise<CatalogItem[]>;
   getAsset(ownerId: string, assetId: string): Promise<Asset | null>;
@@ -56,7 +56,7 @@ export class MemoryAbyRepository implements AbyRepository {
     return preview?.ownerId === ownerId ? structuredClone(preview) : null;
   }
 
-  async markPreviewPromoted(ownerId: string, previewId: string, sourceObjectKey: string, targetObjectKey: string): Promise<IngestPreview> {
+  async markPreviewPromoted(ownerId: string, previewId: string, sourceObjectKey: string, targetObjectKey: string, updatedCandidateMetadata?: any): Promise<IngestPreview> {
     const preview = this.#previews.get(previewId);
     if (!preview || preview.ownerId !== ownerId) throw new AbyError('preview_not_found', 'Ingest preview not found', 404);
     if (preview.status !== 'candidate') throw new AbyError('preview_not_promotable', 'Only candidate previews can be promoted', 409);
@@ -66,6 +66,7 @@ export class MemoryAbyRepository implements AbyRepository {
     const promoted: IngestPreview = {
       ...preview,
       objectKey: targetObjectKey,
+      candidateMetadata: updatedCandidateMetadata || preview.candidateMetadata,
       provenance: {
         ...preview.provenance,
         parameters: {
@@ -107,17 +108,43 @@ export class MemoryAbyRepository implements AbyRepository {
       return structuredClone(existing);
     }
     const now = new Date().toISOString();
-    const asset: Asset = {
-      id: randomUUID(), ownerId, workId: randomUUID(), recordingId: randomUUID(), provider: preview.provider,
-      ...(preview.bucket ? { bucket: preview.bucket } : {}), objectKey: preview.objectKey,
-      originalFilename: preview.originalFilename, checksumSha256: preview.checksumSha256,
+    const workId = randomUUID();
+    const provenance = accepted({ ...preview.provenance, jobId: preview.id }, ownerId);
+    
+    const tracks = preview.candidateMetadata.tracks || [{
+      objectKey: preview.objectKey,
+      originalFilename: preview.originalFilename,
+      checksumSha256: preview.checksumSha256,
       technicalMetadata: preview.technicalMetadata,
-      canonicalMetadata: { ...preview.candidateMetadata, title: workTitle, recordingTitle },
-      provenance: accepted({ ...preview.provenance, jobId: preview.id }, ownerId), createdAt: now
-    };
-    this.#assets.set(asset.id, asset);
+      recordingTitle: recordingTitle
+    }];
+
+    let mainAsset: Asset | undefined;
+
+    for (const track of tracks) {
+      const duplicateChecksum = [...this.#assets.values()].find(
+        (value) => value.ownerId === ownerId && value.checksumSha256 === track.checksumSha256
+      );
+      if (duplicateChecksum) {
+        throw new AbyError('canonical_checksum_conflict', 'These bytes are already registered under another canonical object key; explicit reconciliation is required', 409);
+      }
+
+      const asset: Asset = {
+        id: randomUUID(), ownerId, workId, recordingId: randomUUID(), provider: preview.provider,
+        ...(preview.bucket ? { bucket: preview.bucket } : {}), objectKey: track.objectKey,
+        originalFilename: track.originalFilename, checksumSha256: track.checksumSha256,
+        technicalMetadata: track.technicalMetadata,
+        canonicalMetadata: { ...preview.candidateMetadata, title: workTitle, recordingTitle: track.recordingTitle, tracks: undefined },
+        provenance, createdAt: now
+      };
+      this.#assets.set(asset.id, asset);
+      if (track.objectKey === preview.objectKey || track.objectKey === preview.candidateMetadata.canonicalObjectKey) {
+        mainAsset = asset;
+      }
+    }
+    
     this.#previews.set(preview.id, { ...preview, status: 'committed' });
-    return structuredClone(asset);
+    return structuredClone(mainAsset || [...this.#assets.values()][0]);
   }
 
   async getAsset(ownerId: string, assetId: string): Promise<Asset | null> {
@@ -224,7 +251,7 @@ export class PostgresAbyRepository implements AbyRepository {
     return result.rows[0] ? mapPreview(result.rows[0]) : null;
   }
 
-  async markPreviewPromoted(ownerId: string, previewId: string, sourceObjectKey: string, targetObjectKey: string): Promise<IngestPreview> {
+  async markPreviewPromoted(ownerId: string, previewId: string, sourceObjectKey: string, targetObjectKey: string, updatedCandidateMetadata?: any): Promise<IngestPreview> {
     const client = await this.#pool.connect();
     try {
       await client.query('BEGIN');
@@ -249,8 +276,8 @@ export class PostgresAbyRepository implements AbyRepository {
         }
       };
       const updated = await client.query(
-        'UPDATE aby.ingest_candidates SET object_key=$1,provenance=$2,updated_at=now() WHERE id=$3 RETURNING *',
-        [targetObjectKey, provenance, previewId]
+        'UPDATE aby.ingest_candidates SET object_key=$1,provenance=$2,candidate_metadata=COALESCE($3, candidate_metadata),updated_at=now() WHERE id=$4 RETURNING *',
+        [targetObjectKey, provenance, updatedCandidateMetadata ?? null, previewId]
       );
       const retirementProvenance: Provenance = {
         method: 'human',
@@ -312,85 +339,128 @@ export class PostgresAbyRepository implements AbyRepository {
       if (preview.candidate_metadata.canonicalObjectKey && preview.candidate_metadata.canonicalObjectKey !== preview.object_key) {
         throw new AbyError('promotion_required', 'The source must be copied, verified and promoted before canonical commit', 409);
       }
-      const lockKeys = [
-        JSON.stringify(['asset-location', ownerId, preview.provider, preview.bucket ?? null, preview.object_key]),
-        JSON.stringify(['asset-checksum', ownerId, preview.checksum_sha256])
-      ].sort();
+
+      const now = new Date().toISOString();
+      const workId = randomUUID();
+      const provenance = accepted({ ...preview.provenance, jobId: preview.id }, ownerId);
+      
+      const tracks = preview.candidate_metadata.tracks || [{
+        objectKey: preview.object_key,
+        originalFilename: preview.original_filename,
+        checksumSha256: preview.checksum_sha256,
+        technicalMetadata: preview.technical_metadata,
+        recordingTitle: recordingTitle
+      }];
+
+      // Lock all locations and checksums
+      const lockKeys = [];
+      for (const track of tracks) {
+        lockKeys.push(JSON.stringify(['asset-location', ownerId, preview.provider, preview.bucket ?? null, track.objectKey]));
+        lockKeys.push(JSON.stringify(['asset-checksum', ownerId, track.checksumSha256]));
+      }
+      lockKeys.sort();
       for (const lockKey of lockKeys) {
         await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))', [lockKey]);
       }
-      const duplicate = await client.query(
-        `SELECT a.*,r.work_id,r.title AS existing_recording_title,w.title AS existing_work_title FROM aby.assets a
-         JOIN aby.recordings r ON r.id=a.recording_id
-         JOIN aby.works w ON w.id=r.work_id
-         WHERE a.owner_id=$1 AND a.provider=$2 AND a.bucket IS NOT DISTINCT FROM $3 AND a.object_key=$4
-         FOR UPDATE`,
-        [ownerId, preview.provider, preview.bucket, preview.object_key]
-      );
-      if (duplicate.rows[0]) {
-        const existing = duplicate.rows[0];
-        if (existing.state !== 'active') {
-          throw new AbyError('canonical_asset_inactive', 'Canonical object is already registered but is not active', 409);
-        }
-        if (existing.checksum_sha256 !== preview.checksum_sha256) {
-          throw new AbyError('canonical_asset_conflict', 'Canonical object key is already registered with a different checksum', 409);
-        }
-        if (existing.existing_work_title !== workTitle || existing.existing_recording_title !== recordingTitle) {
-          throw new AbyError('canonical_metadata_conflict', 'Canonical asset already exists with different work or recording metadata', 409);
-        }
-        await client.query(
-          "UPDATE aby.ingest_candidates SET status='committed',committed_asset_id=$1,updated_at=now() WHERE id=$2",
-          [existing.id, previewId]
-        );
-        await client.query('COMMIT');
-        return mapAsset(existing);
-      }
-      const checksumDuplicate = await client.query(
-        `SELECT id,provider,bucket,object_key,state FROM aby.assets
-         WHERE owner_id=$1 AND checksum_sha256=$2
-         FOR UPDATE`,
-        [ownerId, preview.checksum_sha256]
-      );
-      if (checksumDuplicate.rows[0]) {
-        throw new AbyError(
-          'canonical_checksum_conflict',
-          'These bytes are already registered under another canonical object key; explicit reconciliation is required',
-          409
-        );
-      }
-      const now = new Date().toISOString();
-      const workId = randomUUID();
-      const recordingId = randomUUID();
-      const assetId = randomUUID();
-      const provenance = accepted({ ...preview.provenance, jobId: preview.id }, ownerId);
-      const canonicalMetadata = { ...preview.candidate_metadata, title: workTitle, recordingTitle };
-      const recordingMetadata = {
-        recordingFolder: preview.candidate_metadata.recordingFolder,
-        releaseDate: preview.candidate_metadata.releaseDate,
-        label: preview.candidate_metadata.label,
-        catalogNumber: preview.candidate_metadata.catalogNumber,
-        identificationCandidates: preview.candidate_metadata.identificationCandidates
-      };
+
+      // 1. Insert unified Work
       await client.query('INSERT INTO aby.works(id,owner_id,title,provenance) VALUES($1,$2,$3,$4)', [workId, ownerId, workTitle, provenance]);
-      await client.query('INSERT INTO aby.recordings(id,owner_id,work_id,title,metadata,provenance) VALUES($1,$2,$3,$4,$5,$6)', [recordingId, ownerId, workId, recordingTitle, recordingMetadata, provenance]);
-      const originalObjectKey = typeof preview.provenance.parameters?.sourceObjectKey === 'string'
-        ? preview.provenance.parameters.sourceObjectKey
-        : preview.object_key;
-      await client.query(
-        `INSERT INTO aby.assets
-         (id,owner_id,recording_id,provider,bucket,object_key,original_filename,original_object_key,original_directory,checksum_sha256,imported_at,technical_metadata,canonical_metadata,provenance)
-         VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
-        [assetId, ownerId, recordingId, preview.provider, preview.bucket, preview.object_key, preview.original_filename,
-          originalObjectKey, preview.original_directory, preview.checksum_sha256, now, preview.technical_metadata, canonicalMetadata, provenance]
-      );
-      await client.query("UPDATE aby.ingest_candidates SET status='committed',committed_asset_id=$1,updated_at=now() WHERE id=$2", [assetId, previewId]);
+
+      let mainAssetId = '';
+      let mainAsset: Asset | undefined;
+
+      // 2. Insert all tracks
+      for (const track of tracks) {
+        const recordingId = randomUUID();
+        const assetId = randomUUID();
+
+        const duplicate = await client.query(
+          `SELECT a.*,r.work_id,r.title AS existing_recording_title,w.title AS existing_work_title FROM aby.assets a
+           JOIN aby.recordings r ON r.id=a.recording_id
+           JOIN aby.works w ON w.id=r.work_id
+           WHERE a.owner_id=$1 AND a.provider=$2 AND a.bucket IS NOT DISTINCT FROM $3 AND a.object_key=$4
+           FOR UPDATE`,
+          [ownerId, preview.provider, preview.bucket, track.objectKey]
+        );
+        if (duplicate.rows[0]) {
+          const existing = duplicate.rows[0];
+          if (existing.state !== 'active') {
+            throw new AbyError('canonical_asset_inactive', 'Canonical object is already registered but is not active', 409);
+          }
+          if (existing.checksum_sha256 !== track.checksumSha256) {
+            throw new AbyError('canonical_asset_conflict', 'Canonical object key is already registered with a different checksum', 409);
+          }
+          if (track.objectKey === preview.object_key || track.objectKey === preview.candidate_metadata.canonicalObjectKey) {
+            mainAssetId = existing.id;
+          }
+          continue;
+        }
+
+        const checksumDuplicate = await client.query(
+          `SELECT id FROM aby.assets WHERE owner_id=$1 AND checksum_sha256=$2 FOR UPDATE`,
+          [ownerId, track.checksumSha256]
+        );
+        if (checksumDuplicate.rows[0]) {
+          throw new AbyError(
+            'canonical_checksum_conflict',
+            'These bytes are already registered under another canonical object key; explicit reconciliation is required',
+            409
+          );
+        }
+
+        const canonicalMetadata = { 
+          ...preview.candidate_metadata, 
+          title: workTitle, 
+          recordingTitle: track.recordingTitle,
+          tracks: undefined 
+        };
+        const recordingMetadata = {
+          recordingFolder: preview.candidate_metadata.recordingFolder,
+          releaseDate: preview.candidate_metadata.releaseDate,
+          label: preview.candidate_metadata.label,
+          catalogNumber: preview.candidate_metadata.catalogNumber,
+          identificationCandidates: preview.candidate_metadata.identificationCandidates
+        };
+
+        await client.query(
+          'INSERT INTO aby.recordings(id,owner_id,work_id,title,metadata,provenance) VALUES($1,$2,$3,$4,$5,$6)',
+          [recordingId, ownerId, workId, track.recordingTitle, recordingMetadata, provenance]
+        );
+
+        const originalObjectKey = typeof preview.provenance.parameters?.sourceObjectKey === 'string'
+          ? (preview.provenance.parameters.sourceObjectKey === preview.object_key
+              ? track.objectKey
+              : preview.provenance.parameters.sourceObjectKey)
+          : track.objectKey;
+
+        await client.query(
+          `INSERT INTO aby.assets
+           (id,owner_id,recording_id,provider,bucket,object_key,original_filename,original_object_key,original_directory,checksum_sha256,imported_at,technical_metadata,canonical_metadata,provenance)
+           VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
+          [assetId, ownerId, recordingId, preview.provider, preview.bucket, track.objectKey, track.originalFilename,
+            originalObjectKey, preview.original_directory, track.checksumSha256, now, track.technicalMetadata, canonicalMetadata, provenance]
+        );
+
+        const createdAsset = {
+          id: assetId, ownerId, workId, recordingId, provider: preview.provider,
+          ...(preview.bucket ? { bucket: preview.bucket } : {}), objectKey: track.objectKey,
+          originalFilename: track.originalFilename, checksumSha256: track.checksumSha256,
+          technicalMetadata: track.technicalMetadata, canonicalMetadata, provenance, createdAt: now
+        };
+
+        if (track.objectKey === preview.object_key || track.objectKey === preview.candidate_metadata.canonicalObjectKey) {
+          mainAsset = createdAsset;
+          mainAssetId = assetId;
+        }
+      }
+
+      const finalAssetId = mainAssetId || (tracks[0] ? tracks[0].id : '');
+      await client.query("UPDATE aby.ingest_candidates SET status='committed',committed_asset_id=$1,updated_at=now() WHERE id=$2", [finalAssetId, previewId]);
       await client.query('COMMIT');
-      return {
-        id: assetId, ownerId, workId, recordingId, provider: preview.provider,
-        ...(preview.bucket ? { bucket: preview.bucket } : {}), objectKey: preview.object_key,
-        originalFilename: preview.original_filename, checksumSha256: preview.checksum_sha256,
-        technicalMetadata: preview.technical_metadata, canonicalMetadata, provenance, createdAt: now
-      };
+
+      if (mainAsset) return mainAsset;
+      const finalAsset = await client.query(`SELECT a.*, r.work_id FROM aby.assets a JOIN aby.recordings r ON r.id=a.recording_id WHERE a.id=$1`, [finalAssetId]);
+      return mapAsset(finalAsset.rows[0]);
     } catch (error) {
       await client.query('ROLLBACK');
       throw error;

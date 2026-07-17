@@ -306,6 +306,29 @@
       {#if preview}
         <label>Work title<input bind:value={workTitle} /></label>
         <label>Recording title<input bind:value={recordingTitle} /></label>
+        {#if preview.candidateMetadata.tracks && preview.candidateMetadata.tracks.length > 1}
+          <div style="margin-top: 14px; margin-bottom: 14px; border: 1px solid var(--line); padding: 12px; background: #131412;">
+            <header style="font-size: 11px; font-weight: 600; text-transform: uppercase; color: var(--signal); margin-bottom: 6px; letter-spacing: 0.05em;">
+              Complete Album Detected ({preview.candidateMetadata.tracks.length} tracks)
+            </header>
+            <p style="font-size: 11px; color: var(--muted); margin: 0 0 10px 0; line-height: 1.4;">
+              Committing will catalog all sibling files in this folder under the same Work.
+            </p>
+            <div style="max-height: 150px; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; padding-right: 4px;">
+              {#each preview.candidateMetadata.tracks as track (track.objectKey)}
+                <div style="font-size: 10px; font-family: ui-monospace, monospace; border-bottom: 1px dashed #20221f; padding: 4px 0; display: flex; justify-content: space-between; gap: 8px;">
+                  <span style="color: #fff; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 60%;" title={track.originalFilename}>
+                    {track.originalFilename}
+                  </span>
+                  <span style="color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 40%; text-align: right;">
+                    {track.recordingTitle}
+                  </span>
+                </div>
+              {/each}
+            </div>
+          </div>
+        {/if}
+
         {#if requiresPromotion}
           <button class="primary" onclick={promoteCandidate} disabled={busy || Boolean(asset)}>Promote to Aby</button>
         {:else}

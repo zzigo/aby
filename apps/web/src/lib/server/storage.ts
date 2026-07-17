@@ -196,3 +196,37 @@ export async function listWasabiSourceKeys(): Promise<string[]> {
 
   return keys;
 }
+
+export async function listWasabiSiblingKeys(objectKey: string): Promise<string[]> {
+  const config = readConfig();
+  const bucket = config.WASABI_BUCKET!;
+  const root = config.wasabiRootPrefix ? normalizeObjectKey(config.wasabiRootPrefix).replace(/\/+$/, '') + '/' : '';
+  
+  const key = normalizeObjectKey(objectKey);
+  const lastSlash = key.lastIndexOf('/');
+  const dir = lastSlash !== -1 ? key.substring(0, lastSlash) : '';
+  const physicalPrefix = `${root}${dir}/`;
+  
+  const response = await wasabiClient().send(new ListObjectsV2Command({
+    Bucket: bucket,
+    Prefix: physicalPrefix
+  }));
+
+  const keys: string[] = [];
+  if (response.Contents) {
+    for (const obj of response.Contents) {
+      if (!obj.Key || obj.Key.endsWith('/')) continue;
+      
+      const dotIndex = obj.Key.lastIndexOf('.');
+      const ext = dotIndex !== -1 ? obj.Key.substring(dotIndex).toLowerCase() : '';
+      if (!['.mp3', '.wav', '.m4a', '.flac', '.ogg', '.aac', '.mp4', '.mov'].includes(ext)) continue;
+      
+      let logicalKey = obj.Key;
+      if (root && logicalKey.startsWith(root)) {
+        logicalKey = logicalKey.substring(root.length);
+      }
+      keys.push(logicalKey);
+    }
+  }
+  return keys.sort();
+}
