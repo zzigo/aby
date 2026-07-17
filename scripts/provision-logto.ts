@@ -84,7 +84,10 @@ const tokenResponse = await fetch(`${endpoint}/oidc/token`, {
   },
   body: new URLSearchParams({ grant_type: 'client_credentials', resource: managementResource, scope: 'all' })
 });
-if (!tokenResponse.ok) throw new Error(`Logto Management token failed with HTTP ${tokenResponse.status}`);
+if (!tokenResponse.ok) {
+  const detail = (await tokenResponse.text()).replace(/\s+/g, ' ').slice(0, 300);
+  throw new Error(`Logto Management token failed with HTTP ${tokenResponse.status}: ${detail}`);
+}
 const { access_token: accessToken } = await tokenResponse.json() as { access_token?: string };
 if (!accessToken) throw new Error('Logto Management token response omitted access_token');
 
