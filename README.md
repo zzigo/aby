@@ -46,6 +46,7 @@ docs                     Architecture, boundaries, operations and roadmap
 ```
 
 See [Phase 0](docs/PHASE-0.md) for assumptions and validation scope.
+See [VPS deployment](docs/DEPLOYMENT.md) for the live layout, tunnel and release sequence.
 
 ## VPS workspace and tunnel
 

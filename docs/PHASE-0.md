@@ -24,7 +24,7 @@
 
 The current Aby prompt supersedes the older proposal's provisional “Media Library” name and shared-core diagram. The Systems MOC's bounded-context and cross-system rules govern filesystem and integration decisions. The ontology and media pipeline from the older specification remain authoritative where they do not conflict.
 
-No production host, DNS, bucket, Logto client, PostgreSQL schema or Qdrant collection is created in Phase 0. The fixture proves behavior but is not a canonical production store.
+The initial local Phase 0 created no external state. The subsequent VPS baseline provisions an independent checkout, PostgreSQL database/schema, PM2 process and Caddy route. It reuses the existing Wasabi bucket only through the isolated `aby/media/` prefix and does not create objects or Qdrant collections. A dedicated Logto application remains pending.
 
 ## Validation
 
@@ -33,7 +33,7 @@ No production host, DNS, bucket, Logto client, PostgreSQL schema or Qdrant colle
 - `bun test`: 8 passing tests covering domain intervals, opt-in analysis, SHA-256, ffprobe parsing, owner isolation and storage-prefix enforcement.
 - `bun run build`: SvelteKit production build succeeds with Vite 7.3.6 and the official Node adapter.
 - HTTP smoke: health, fixture inspection, candidate preview, canonical commit, playback URL and manual segment creation all succeed in sequence.
-- Migration execution remains unverified locally: the installed PostgreSQL 15 keg contains client tools but its `postgres` server binary is absent, and no database was accepting connections. No external database was contacted.
+- Local migration execution was unavailable because the workstation has PostgreSQL client tools but no server. The migration was subsequently applied on the VPS to the dedicated `aby` database and verified with 14 tables in schema `aby`, owned by `aby_app`.
 - Seshat remained clean at commit `249480cb5730843545ecf1c2a6a8c4a4d16f296f`; Musiki had no files modified during the audit window. The existing rclone Wasabi process retained PID 3043 and no rsync process was started.
 - Secret scan found only `.env.example` and no key/private-key signatures.
 
@@ -64,3 +64,5 @@ aby/
 ## VPS organization
 
 The operational root is `/opt/apps/aby`, owned by `zz`. Aby reserves loopback port `4332`, immediately after Seshat's `4331`. PostgreSQL and Qdrant remain shared infrastructure but Aby receives a dedicated database role/database and namespaced schema/collections. `scripts/tunnel-vps.sh` forwards app, database and Qdrant ports without exposing them on public interfaces.
+
+PM2 process `aby-web` runs the production build on `127.0.0.1:4332`. Caddy has a validated `aby.zztt.org` reverse proxy and a pre-change backup at `/etc/caddy/Caddyfile.before-aby-20260717`. Public TLS is pending because Cloudflare DNS lacks the `aby` record and the available API token returned HTTP 403 without making a change.
