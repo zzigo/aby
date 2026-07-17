@@ -12,7 +12,7 @@
 | Wasabi | shared operational credentials; legacy `ref/` and `mov/` sources, canonical `aby/aud/` and `aby/mov/` |
 | Caddy | `aby.zztt.org -> 127.0.0.1:4332` |
 
-The remote `.env` is owned by `zz`, mode 0600, and is never copied into Git. `bun run logto:provision` creates or updates Aby's dedicated Traditional Web client through the self-hosted Logto Management API and writes the client ID, client secret and cookie encryption key directly into that file without printing them.
+The remote `.env` is owned by `zz`, mode 0600, and is never copied into Git. `bun run logto:provision` creates or updates Aby's dedicated Traditional Web client through the self-hosted Logto Management API and writes the client ID, client secret and cookie encryption key directly into that file without printing them. On older OSS installations where the seeded `m-default` application has only a deprecated legacy secret, the helper adds a new named active secret before using the Management API; it does not replace existing credentials.
 
 ## Tunnel
 

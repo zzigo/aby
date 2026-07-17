@@ -31,11 +31,22 @@ async function managementCredentials() {
   return dockerNode<{ id: string; secret: string }>(String.raw`
     (async()=>{
       const {Client}=require('pg');
+      const {randomBytes}=require('crypto');
       const client=new Client({connectionString:process.env.DB_URL});
       await client.connect();
-      const result=await client.query(
-        "select a.id,coalesce((select s.value from application_secrets s where s.application_id=a.id and (s.expires_at is null or s.expires_at>now()) order by s.created_at desc limit 1),a.secret) as secret from applications a where a.id='m-default'"
+      let result=await client.query(
+        "select a.id,s.value as secret from applications a join application_secrets s on s.application_id=a.id where a.id='m-default' and (s.expires_at is null or s.expires_at>now()) order by s.created_at desc limit 1"
       );
+      if(!result.rows[0]){
+        const secret=randomBytes(24).toString('base64url');
+        await client.query(
+          "insert into application_secrets(tenant_id,application_id,name,value,created_at,expires_at) select tenant_id,id,'Aby provisioning', $1,now(),null from applications where id='m-default' on conflict do nothing",
+          [secret]
+        );
+        result=await client.query(
+          "select a.id,s.value as secret from applications a join application_secrets s on s.application_id=a.id where a.id='m-default' and (s.expires_at is null or s.expires_at>now()) order by s.created_at desc limit 1"
+        );
+      }
       await client.end();
       if(!result.rows[0]) throw new Error('Management application secret not found');
       console.log(JSON.stringify({id:result.rows[0].id,secret:result.rows[0].secret}));
@@ -47,12 +58,24 @@ async function applicationSecret(applicationId: string) {
   return dockerNode<{ secret: string }>(String.raw`
     (async()=>{
       const {Client}=require('pg');
+      const {randomBytes}=require('crypto');
       const client=new Client({connectionString:process.env.DB_URL});
       await client.connect();
-      const result=await client.query(
-        "select coalesce((select s.value from application_secrets s where s.application_id=a.id and (s.expires_at is null or s.expires_at>now()) order by s.created_at desc limit 1),a.secret) as secret from applications a where a.id=$1",
+      let result=await client.query(
+        "select s.value as secret from application_secrets s where s.application_id=$1 and (s.expires_at is null or s.expires_at>now()) order by s.created_at desc limit 1",
         [${JSON.stringify(applicationId)}]
       );
+      if(!result.rows[0]){
+        const secret=randomBytes(24).toString('base64url');
+        await client.query(
+          "insert into application_secrets(tenant_id,application_id,name,value,created_at,expires_at) select tenant_id,id,'Default secret',$2,now(),null from applications where id=$1 on conflict do nothing",
+          [${JSON.stringify(applicationId)},secret]
+        );
+        result=await client.query(
+          "select value as secret from application_secrets where application_id=$1 and (expires_at is null or expires_at>now()) order by created_at desc limit 1",
+          [${JSON.stringify(applicationId)}]
+        );
+      }
       await client.end();
       if(!result.rows[0]) throw new Error('Aby application secret not found');
       console.log(JSON.stringify({secret:result.rows[0].secret}));
