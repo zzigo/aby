@@ -3,6 +3,7 @@ import { readFile, rename, writeFile } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 
 const endpoint = process.env.ABY_LOGTO_ENDPOINT || 'https://logto.zztt.org';
+const adminEndpoint = process.env.ABY_LOGTO_ADMIN_ENDPOINT || 'https://logto-admin.zztt.org';
 const envPath = process.env.ABY_ENV_PATH || '/opt/apps/aby/.env';
 const managementResource = 'https://default.logto.app/api';
 const redirectUri = 'https://aby.zztt.org/callback';
@@ -99,7 +100,10 @@ function setEnv(source: string, key: string, value: string): string {
 }
 
 const management = await managementCredentials();
-const tokenResponse = await fetch(`${endpoint}/oidc/token`, {
+// The built-in Management API client belongs to Logto's admin tenant. Its token
+// is issued by ADMIN_ENDPOINT, while the token audience and API itself belong to
+// the default tenant served from ENDPOINT.
+const tokenResponse = await fetch(`${adminEndpoint}/oidc/token`, {
   method: 'POST',
   headers: {
     authorization: `Basic ${Buffer.from(`${management.id}:${management.secret}`).toString('base64')}`,
