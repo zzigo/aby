@@ -107,7 +107,7 @@ CREATE TABLE IF NOT EXISTS aby.jobs (
   type text NOT NULL,
   idempotency_key text NOT NULL UNIQUE,
   state text NOT NULL DEFAULT 'queued' CHECK (state IN ('queued', 'running', 'succeeded', 'failed', 'cancelled')),
-  analyze boolean NOT NULL DEFAULT false,
+  analysis_requested boolean NOT NULL DEFAULT false,
   payload jsonb NOT NULL,
   result jsonb,
   attempts integer NOT NULL DEFAULT 0,
@@ -223,4 +223,3 @@ CREATE INDEX IF NOT EXISTS relations_subject_idx ON aby.relations(subject_type, 
 CREATE INDEX IF NOT EXISTS relations_object_idx ON aby.relations(object_context, object_type, object_id);
 
 COMMIT;
-
