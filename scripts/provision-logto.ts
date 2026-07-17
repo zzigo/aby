@@ -34,7 +34,7 @@ async function managementCredentials() {
       const client=new Client({connectionString:process.env.DB_URL});
       await client.connect();
       const result=await client.query(
-        "select a.id,s.value as secret from applications a join application_secrets s on s.application_id=a.id where a.id='m-default' and (s.expires_at is null or s.expires_at>now()) order by s.created_at desc limit 1"
+        "select a.id,coalesce((select s.value from application_secrets s where s.application_id=a.id and (s.expires_at is null or s.expires_at>now()) order by s.created_at desc limit 1),a.secret) as secret from applications a where a.id='m-default'"
       );
       await client.end();
       if(!result.rows[0]) throw new Error('Management application secret not found');
@@ -50,7 +50,7 @@ async function applicationSecret(applicationId: string) {
       const client=new Client({connectionString:process.env.DB_URL});
       await client.connect();
       const result=await client.query(
-        "select value as secret from application_secrets where application_id=$1 and (expires_at is null or expires_at>now()) order by created_at desc limit 1",
+        "select coalesce((select s.value from application_secrets s where s.application_id=a.id and (s.expires_at is null or s.expires_at>now()) order by s.created_at desc limit 1),a.secret) as secret from applications a where a.id=$1",
         [${JSON.stringify(applicationId)}]
       );
       await client.end();
