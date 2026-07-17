@@ -2,6 +2,7 @@
   import type { Asset, IngestPreview, Segment } from '@zztt/aby-domain';
   import type { PageData } from './$types';
   import { loadPlayback } from '$lib/player';
+  import { formatDuration, formatTechnicalFormat } from '$lib/presentation';
 
   let { data }: { data: PageData } = $props();
 
@@ -169,8 +170,9 @@
         <div><dt>Source key</dt><dd class="mono">{preview.objectKey}</dd></div>
         {#if preview.candidateMetadata.canonicalObjectKey}<div><dt>Proposed key</dt><dd class="mono">{preview.candidateMetadata.canonicalObjectKey}</dd></div>{/if}
         <div><dt>SHA-256</dt><dd class="mono">{preview.checksumSha256}</dd></div>
-        <div><dt>Format</dt><dd>{preview.technicalMetadata.formatName} · {preview.technicalMetadata.audioCodec ?? 'unknown codec'}</dd></div>
-        <div><dt>Signal</dt><dd>{preview.technicalMetadata.sampleRate ?? '—'} Hz · {preview.technicalMetadata.channels ?? '—'} ch · {preview.technicalMetadata.durationMs} ms</dd></div>
+        <div><dt>Format</dt><dd>{formatTechnicalFormat(preview.technicalMetadata)}</dd></div>
+        <div><dt>Length</dt><dd>{formatDuration(preview.technicalMetadata.durationMs)}</dd></div>
+        <div><dt>Signal</dt><dd>{preview.technicalMetadata.sampleRate ?? '—'} Hz · {preview.technicalMetadata.channels ?? '—'} ch</dd></div>
         <div><dt>Review state</dt><dd>{asset ? 'accepted by human commit' : preview.status}</dd></div>
         {#if preview.candidateMetadata.identificationCandidates?.[0]}
           <!-- eslint-disable-next-line svelte/no-navigation-without-resolve -->

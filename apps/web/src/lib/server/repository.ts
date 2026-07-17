@@ -110,8 +110,15 @@ export class PostgresAbyRepository implements AbyRepository {
       const assetId = randomUUID();
       const provenance = accepted({ ...preview.provenance, jobId: preview.id }, ownerId);
       const canonicalMetadata = { ...preview.candidate_metadata, title: workTitle, recordingTitle };
+      const recordingMetadata = {
+        recordingFolder: preview.candidate_metadata.recordingFolder,
+        releaseDate: preview.candidate_metadata.releaseDate,
+        label: preview.candidate_metadata.label,
+        catalogNumber: preview.candidate_metadata.catalogNumber,
+        identificationCandidates: preview.candidate_metadata.identificationCandidates
+      };
       await client.query('INSERT INTO aby.works(id,owner_id,title,provenance) VALUES($1,$2,$3,$4)', [workId, ownerId, workTitle, provenance]);
-      await client.query('INSERT INTO aby.recordings(id,owner_id,work_id,title,provenance) VALUES($1,$2,$3,$4,$5)', [recordingId, ownerId, workId, recordingTitle, provenance]);
+      await client.query('INSERT INTO aby.recordings(id,owner_id,work_id,title,metadata,provenance) VALUES($1,$2,$3,$4,$5,$6)', [recordingId, ownerId, workId, recordingTitle, recordingMetadata, provenance]);
       await client.query(
         `INSERT INTO aby.assets
          (id,owner_id,recording_id,provider,bucket,object_key,original_filename,original_object_key,original_directory,checksum_sha256,imported_at,technical_metadata,canonical_metadata,provenance)

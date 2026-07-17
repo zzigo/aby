@@ -43,8 +43,12 @@ export type TechnicalMetadata = z.infer<typeof TechnicalMetadataSchema>;
 export const CandidateMetadataSchema = z.object({
   title: z.string().min(1),
   recordingTitle: z.string().min(1),
+  recordingFolder: z.string().min(1).optional(),
   creator: z.string().optional(),
   date: z.string().optional(),
+  releaseDate: z.string().optional(),
+  label: z.string().optional(),
+  catalogNumber: z.string().optional(),
   entitySlug: z.string().regex(/^[a-z0-9]+$/).optional(),
   collectionCode: z.string().optional(),
   canonicalObjectKey: z.string().optional(),

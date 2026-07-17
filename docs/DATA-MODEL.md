@@ -11,6 +11,8 @@
 
 Times are stored as integer milliseconds in Phase 0 to avoid floating-point drift. A segment requires `0 <= start < end` and may carry channel selection and fades.
 
+`recordings.title` is the human title of the fixation, not its storage folder. Release date, label, catalog number, MusicBrainz evidence and the derived `year-label` folder live in structured recording metadata. Catalog numbers aid identification but do not enter filenames or folder names.
+
 ## Tables
 
 Migration `0001_aby_core.sql` creates the schema and the requested bounded set: works, recordings, assets, segments, annotations, analysis, embeddings, transcripts, working sets, jobs, external identifiers and relations. `ingest_candidates` is the preview ledger required to separate inspection from canonical commit. During gradual adoption its JSON candidate metadata also carries the proposed canonical key, collection code, entity slug, external identification candidates and feature-image candidates. The asset row is not created until storage promotion succeeds.

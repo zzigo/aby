@@ -7,6 +7,7 @@ import type { IngestPreview, SourceIngestPreviewRequest } from '@zztt/aby-domain
 import { inspectLocalAsset } from '@zztt/aby-media-ingest';
 import { AbyError } from './errors';
 import { readConfig } from './config';
+import { recordingFolderName } from './catalog-path';
 import { identifyWithMusicBrainz } from './musicbrainz';
 import type { AbyRepository } from './repository';
 import { assertSourceObjectKey, downloadWasabiSourceObject, headWasabiSourceObject, normalizeObjectKey } from './storage';
@@ -69,19 +70,19 @@ export async function inspectWasabiSource(
     const identification = input.mediaKind === 'aud'
       ? await identifyWithMusicBrainz({ creator: input.creatorDisplay, workTitle: input.workTitle, durationMs: inspected.metadata.durationMs })
       : null;
-    const recordingParts = [
-      identification?.releaseDate?.slice(0, 4),
-      identification?.label,
-      identification?.catalogNumber
-    ].filter((value): value is string => Boolean(value));
-    const recordingTitle = input.recordingTitle || recordingParts.join(' — ') || identification?.recordingTitle || 'Recording';
+    const recordingTitle = input.recordingTitle || identification?.recordingTitle || input.workTitle;
+    const recordingFolder = recordingFolderName({
+      ...(identification?.releaseDate ? { releaseDate: identification.releaseDate } : {}),
+      ...(identification?.label ? { label: identification.label } : {}),
+      fallback: recordingTitle
+    });
     const canonicalPrefix = input.mediaKind === 'aud' ? config.audioPrefix : config.videoPrefix;
     const targetObjectKey = normalizeObjectKey([
       canonicalPrefix.replace(/\/$/, ''),
       input.collectionCode,
       input.entitySlug,
       pathSegment(input.workTitle),
-      pathSegment(recordingTitle),
+      pathSegment(recordingFolder),
       assetFilename(input.workTitle, basename(sourceObjectKey))
     ].join('/'));
     const identificationCandidates = identification ? [{
@@ -130,8 +131,11 @@ export async function inspectWasabiSource(
       candidateMetadata: {
         title: input.workTitle,
         recordingTitle,
+        recordingFolder,
         creator: input.creatorDisplay,
-        ...(identification?.releaseDate ? { date: identification.releaseDate } : {}),
+        ...(identification?.releaseDate ? { releaseDate: identification.releaseDate } : {}),
+        ...(identification?.label ? { label: identification.label } : {}),
+        ...(identification?.catalogNumber ? { catalogNumber: identification.catalogNumber } : {}),
         entitySlug: input.entitySlug,
         collectionCode: input.collectionCode,
         canonicalObjectKey: targetObjectKey,

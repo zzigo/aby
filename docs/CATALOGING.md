@@ -42,7 +42,7 @@ Physical paths follow the domain spine where the evidence is known:
 aby/aud/<collection>/<entity>/<Work>/<Recording>/<Asset>
 ```
 
-Recording folders remain human-readable and editable in preview. The first convention is `year — label — catalog number` when those fields are evidenced by a selected release. Identity never depends only on this text; PostgreSQL stores stable UUIDs and external identifiers.
+Recording folders remain human-readable and editable in preview. The first convention is `year-label`, preserving Unicode and replacing spaces with hyphens: `1990-Les-Disques-du-Crépuscule`. Catalog numbers remain structured release metadata and never enter the folder name. The recording's database title remains its human title; identity never depends only on path text because PostgreSQL stores stable UUIDs and external identifiers.
 
 ## One-work adoption protocol
 
@@ -77,7 +77,7 @@ Observed technical facts: one MP3 asset, stereo, 48 kHz, 320 kb/s, approximately
 Initial proposed destination:
 
 ```text
-aby/aud/20L/bryars/The Sinking of the Titanic/1990 — Les Disques du Crépuscule — TWI 922-2/The Sinking of the Titanic.mp3
+aby/aud/20L/bryars/The Sinking of the Titanic/1990-Les-Disques-du-Crépuscule/The Sinking of the Titanic.mp3
 ```
 
 Creating the preview is non-canonical and non-destructive. Copying or retiring the source requires the subsequent promotion step.
