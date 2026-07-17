@@ -1,6 +1,7 @@
 import { CopyObjectCommand, DeleteObjectCommand, GetObjectCommand, HeadObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { createReadStream, createWriteStream } from 'node:fs';
+import { stat } from 'node:fs/promises';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import type { Asset } from '@zztt/aby-domain';
@@ -129,10 +130,12 @@ export async function deleteWasabiCanonicalObject(objectKey: string): Promise<vo
 export async function uploadWasabiArtifact(objectKey: string, localPath: string, contentType: string): Promise<void> {
   const config = readConfig();
   const key = assertAbyObjectKey(objectKey, config.storagePrefix);
+  const file = await stat(localPath);
   await wasabiClient().send(new PutObjectCommand({
     Bucket: config.WASABI_BUCKET!,
     Key: toWasabiKey(key, config.wasabiRootPrefix),
     Body: createReadStream(localPath),
+    ContentLength: file.size,
     ContentType: contentType,
     Metadata: { derived: 'true' }
   }));
