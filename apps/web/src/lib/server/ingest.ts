@@ -121,7 +121,7 @@ export async function inspectWasabiSource(
     const recordingFolder = recordingFolderName({
       ...(identification?.releaseDate ? { releaseDate: identification.releaseDate } : {}),
       ...(identification?.label ? { label: identification.label } : {}),
-      fallback: recordingTitle
+      fallback: albumTitle || recordingTitle
     });
     const canonicalPrefix = input.mediaKind === 'aud' ? config.audioPrefix : config.videoPrefix;
     
