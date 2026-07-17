@@ -145,6 +145,26 @@ export const AssetSchema = z.object({
 });
 export type Asset = z.infer<typeof AssetSchema>;
 
+export const CatalogSegmentSchema = z.object({
+  id: IdentifierSchema,
+  startTimeMs: z.number().int().nonnegative(),
+  endTimeMs: z.number().int().positive(),
+  label: z.string().optional()
+});
+export type CatalogSegment = z.infer<typeof CatalogSegmentSchema>;
+
+export const CatalogItemSchema = z.object({
+  asset: AssetSchema,
+  workTitle: z.string().min(1),
+  recordingTitle: z.string().min(1),
+  creator: z.string().optional(),
+  coverUrl: z.string().url().optional(),
+  releaseDate: z.string().optional(),
+  label: z.string().optional(),
+  segments: z.array(CatalogSegmentSchema)
+});
+export type CatalogItem = z.infer<typeof CatalogItemSchema>;
+
 export const SegmentCreateSchema = z.object({
   assetId: IdentifierSchema,
   startTimeMs: z.number().int().nonnegative(),

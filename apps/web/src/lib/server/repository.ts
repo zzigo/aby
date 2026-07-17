@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import pg from 'pg';
-import type { Asset, IngestPreview, Provenance, Segment, SegmentCreate } from '@zztt/aby-domain';
+import type { Asset, CatalogItem, IngestPreview, Provenance, Segment, SegmentCreate } from '@zztt/aby-domain';
 import { AbyError } from './errors';
 import { readConfig } from './config';
 
@@ -9,6 +9,7 @@ export interface AbyRepository {
   getPreview(ownerId: string, previewId: string): Promise<IngestPreview | null>;
   markPreviewPromoted(ownerId: string, previewId: string, sourceObjectKey: string, targetObjectKey: string): Promise<IngestPreview>;
   commitPreview(ownerId: string, previewId: string, workTitle: string, recordingTitle: string): Promise<Asset>;
+  listCatalog(ownerId: string): Promise<CatalogItem[]>;
   getAsset(ownerId: string, assetId: string): Promise<Asset | null>;
   createSegment(ownerId: string, input: SegmentCreate, provenance: Provenance): Promise<Segment>;
 }
@@ -82,6 +83,28 @@ export class MemoryAbyRepository implements AbyRepository {
   async getAsset(ownerId: string, assetId: string): Promise<Asset | null> {
     const asset = this.#assets.get(assetId);
     return asset?.ownerId === ownerId ? structuredClone(asset) : null;
+  }
+
+  async listCatalog(ownerId: string): Promise<CatalogItem[]> {
+    return [...this.#assets.values()]
+      .filter((asset) => asset.ownerId === ownerId)
+      .map((asset) => ({
+        asset: structuredClone(asset),
+        workTitle: asset.canonicalMetadata.title,
+        recordingTitle: asset.canonicalMetadata.recordingTitle,
+        ...(asset.canonicalMetadata.creator ? { creator: asset.canonicalMetadata.creator } : {}),
+        ...(asset.canonicalMetadata.imageCandidates?.[0]?.url ? { coverUrl: asset.canonicalMetadata.imageCandidates[0].url } : {}),
+        ...(asset.canonicalMetadata.releaseDate ? { releaseDate: asset.canonicalMetadata.releaseDate } : {}),
+        ...(asset.canonicalMetadata.label ? { label: asset.canonicalMetadata.label } : {}),
+        segments: [...this.#segments.values()]
+          .filter((segment) => segment.ownerId === ownerId && segment.assetId === asset.id)
+          .map((segment) => ({
+            id: segment.id,
+            startTimeMs: segment.startTimeMs,
+            endTimeMs: segment.endTimeMs,
+            ...(segment.label ? { label: segment.label } : {})
+          }))
+      }));
   }
 
   async createSegment(ownerId: string, input: SegmentCreate, provenance: Provenance): Promise<Segment> {
@@ -274,6 +297,45 @@ export class PostgresAbyRepository implements AbyRepository {
        WHERE a.id=$1 AND a.owner_id=$2`, [assetId, ownerId]
     );
     return result.rows[0] ? mapAsset(result.rows[0]) : null;
+  }
+
+  async listCatalog(ownerId: string): Promise<CatalogItem[]> {
+    const result = await this.#pool.query(
+      `SELECT a.*,r.title AS recording_title,r.work_id,w.title AS work_title,
+        COALESCE(jsonb_agg(jsonb_build_object(
+          'id',s.id,
+          'startTimeMs',s.start_time_ms,
+          'endTimeMs',s.end_time_ms,
+          'label',s.label
+        ) ORDER BY s.start_time_ms) FILTER (WHERE s.id IS NOT NULL),'[]'::jsonb) AS segments
+       FROM aby.assets a
+       JOIN aby.recordings r ON r.id=a.recording_id
+       JOIN aby.works w ON w.id=r.work_id
+       LEFT JOIN aby.segments s ON s.asset_id=a.id AND s.owner_id=a.owner_id
+       WHERE a.owner_id=$1 AND a.state='active'
+       GROUP BY a.id,r.title,r.work_id,w.title
+       ORDER BY lower(w.title),a.created_at`,
+      [ownerId]
+    );
+    return result.rows.map((row) => {
+      const asset = mapAsset(row);
+      const imageCandidate = asset.canonicalMetadata.imageCandidates?.[0];
+      return {
+        asset,
+        workTitle: row.work_title,
+        recordingTitle: row.recording_title,
+        ...(asset.canonicalMetadata.creator ? { creator: asset.canonicalMetadata.creator } : {}),
+        ...(imageCandidate?.url ? { coverUrl: imageCandidate.url } : {}),
+        ...(asset.canonicalMetadata.releaseDate ? { releaseDate: asset.canonicalMetadata.releaseDate } : {}),
+        ...(asset.canonicalMetadata.label ? { label: asset.canonicalMetadata.label } : {}),
+        segments: row.segments.map((segment: { id: string; startTimeMs: number | string; endTimeMs: number | string; label?: string | null }) => ({
+          id: segment.id,
+          startTimeMs: Number(segment.startTimeMs),
+          endTimeMs: Number(segment.endTimeMs),
+          ...(segment.label ? { label: segment.label } : {})
+        }))
+      };
+    });
   }
 
   async createSegment(ownerId: string, input: SegmentCreate, provenance: Provenance): Promise<Segment> {

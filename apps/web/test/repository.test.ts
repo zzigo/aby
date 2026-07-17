@@ -24,6 +24,9 @@ describe('preview-before-write repository flow', () => {
       assetId: asset.id, startTimeMs: 100, endTimeMs: 400, channelSelection: [], fadeInMs: 0, fadeOutMs: 0
     }, { method: 'human', source: 'test', actorId: 'owner-a', parameters: {}, timestamp: new Date().toISOString(), reviewState: 'accepted' });
     expect(segment.endTimeMs).toBe(400);
+    const catalog = await repository.listCatalog('owner-a');
+    expect(catalog[0]?.workTitle).toBe('Accepted work');
+    expect(catalog[0]?.segments[0]?.startTimeMs).toBe(100);
   });
 
   test('does not leak assets across owners', async () => {

@@ -1,7 +1,7 @@
 <script lang="ts">
   import type { Asset, IngestPreview, Segment } from '@zztt/aby-domain';
   import type { PageData } from './$types';
-  import { loadPlayback } from '$lib/player';
+  import { loadPlayback, loadSegmentPlayback } from '$lib/player';
   import { formatDuration, formatTechnicalFormat } from '$lib/presentation';
 
   let { data }: { data: PageData } = $props();
@@ -115,6 +115,16 @@
       status = error instanceof Error ? error.message : 'Playback failed';
     }
   }
+
+  async function playSegment() {
+    if (!asset || !segment) return;
+    try {
+      await loadSegmentPlayback(asset.id, `${workTitle} · segment`, recordingTitle, segment.startTimeMs, segment.endTimeMs);
+      status = `Playing segment ${segment.startTimeMs}–${segment.endTimeMs} ms.`;
+    } catch (error) {
+      status = error instanceof Error ? error.message : 'Segment playback failed';
+    }
+  }
 </script>
 
 <svelte:head>
@@ -173,6 +183,7 @@
         </div>
         <div class="actions">
           <button class="secondary" onclick={play}>Play asset</button>
+          {#if segment}<button class="secondary" onclick={playSegment}>Play segment</button>{/if}
           <button class="primary" onclick={createSegment} disabled={busy}>Save interval</button>
         </div>
       {:else}
