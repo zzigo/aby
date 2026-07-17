@@ -13,6 +13,7 @@
   let workTitle = $state('');
   let recordingTitle = $state('');
   let creator = $state('');
+  let date = $state('');
   let releaseDate = $state('');
   let label = $state('');
   let catalogNumber = $state('');
@@ -80,6 +81,7 @@
       workTitle = preview!.candidateMetadata.title;
       recordingTitle = preview!.candidateMetadata.recordingTitle;
       creator = preview!.candidateMetadata.creator || '';
+      date = preview!.candidateMetadata.date || '';
       releaseDate = preview!.candidateMetadata.releaseDate || '';
       label = preview!.candidateMetadata.label || '';
       catalogNumber = preview!.candidateMetadata.catalogNumber || '';
@@ -153,6 +155,7 @@
       workTitle = preview!.candidateMetadata.title;
       recordingTitle = preview!.candidateMetadata.recordingTitle;
       creator = preview!.candidateMetadata.creator || '';
+      date = preview!.candidateMetadata.date || '';
       releaseDate = preview!.candidateMetadata.releaseDate || '';
       label = preview!.candidateMetadata.label || '';
       catalogNumber = preview!.candidateMetadata.catalogNumber || '';
@@ -175,6 +178,7 @@
         workTitle,
         recordingTitle,
         creator,
+        date,
         releaseDate,
         label,
         catalogNumber
@@ -324,7 +328,10 @@
         <label>Recording/Track title<input bind:value={recordingTitle} /></label>
         <label>Artist/s<input bind:value={creator} /></label>
         <div style="display: flex; gap: 12px; margin-bottom: 12px;">
-          <label style="flex: 1; margin: 0;">Year<input bind:value={releaseDate} style="width: 100%; box-sizing: border-box;" /></label>
+          <label style="flex: 1; margin: 0;">Year (Composition)<input bind:value={date} style="width: 100%; box-sizing: border-box;" /></label>
+          <label style="flex: 1; margin: 0;">Recording Year<input bind:value={releaseDate} style="width: 100%; box-sizing: border-box;" /></label>
+        </div>
+        <div style="display: flex; gap: 12px; margin-bottom: 12px;">
           <label style="flex: 1; margin: 0;">Label<input bind:value={label} style="width: 100%; box-sizing: border-box;" /></label>
           <label style="flex: 1; margin: 0;">Catalog No.<input bind:value={catalogNumber} style="width: 100%; box-sizing: border-box;" /></label>
         </div>

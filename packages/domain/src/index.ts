@@ -144,6 +144,7 @@ export const CommitIngestSchema = z.object({
   workTitle: z.string().trim().min(1).max(500),
   recordingTitle: z.string().trim().min(1).max(500),
   creator: z.string().trim().max(500).optional(),
+  date: z.string().trim().max(500).optional(),
   releaseDate: z.string().trim().max(500).optional(),
   label: z.string().trim().max(500).optional(),
   catalogNumber: z.string().trim().max(500).optional()

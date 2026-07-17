@@ -34,6 +34,7 @@ export interface AbyRepository {
     workTitle: string,
     recordingTitle: string,
     creator?: string,
+    date?: string,
     releaseDate?: string,
     label?: string,
     catalogNumber?: string
@@ -97,6 +98,7 @@ export class MemoryAbyRepository implements AbyRepository {
     workTitle: string,
     recordingTitle: string,
     creator?: string,
+    date?: string,
     releaseDate?: string,
     label?: string,
     catalogNumber?: string
@@ -138,6 +140,7 @@ export class MemoryAbyRepository implements AbyRepository {
     }];
 
     const finalCreator = creator !== undefined ? creator : preview.candidateMetadata.creator;
+    const finalDate = date !== undefined ? date : preview.candidateMetadata.date;
     const finalReleaseDate = releaseDate !== undefined ? releaseDate : preview.candidateMetadata.releaseDate;
     const finalLabel = label !== undefined ? label : preview.candidateMetadata.label;
     const finalCatalogNumber = catalogNumber !== undefined ? catalogNumber : preview.candidateMetadata.catalogNumber;
@@ -162,6 +165,7 @@ export class MemoryAbyRepository implements AbyRepository {
           title: workTitle, 
           recordingTitle: track.recordingTitle, 
           creator: finalCreator,
+          date: finalDate,
           releaseDate: finalReleaseDate,
           label: finalLabel,
           catalogNumber: finalCatalogNumber,
@@ -354,6 +358,7 @@ export class PostgresAbyRepository implements AbyRepository {
     workTitle: string,
     recordingTitle: string,
     creator?: string,
+    date?: string,
     releaseDate?: string,
     label?: string,
     catalogNumber?: string
@@ -394,6 +399,7 @@ export class PostgresAbyRepository implements AbyRepository {
       }];
 
       const finalCreator = creator !== undefined ? creator : preview.candidate_metadata.creator;
+      const finalDate = date !== undefined ? date : preview.candidate_metadata.date;
       const finalReleaseDate = releaseDate !== undefined ? releaseDate : preview.candidate_metadata.releaseDate;
       const finalLabel = label !== undefined ? label : preview.candidate_metadata.label;
       const finalCatalogNumber = catalogNumber !== undefined ? catalogNumber : preview.candidate_metadata.catalogNumber;
@@ -409,8 +415,9 @@ export class PostgresAbyRepository implements AbyRepository {
         await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))', [lockKey]);
       }
 
-      // 1. Insert unified Work
-      await client.query('INSERT INTO aby.works(id,owner_id,title,provenance) VALUES($1,$2,$3,$4)', [workId, ownerId, workTitle, provenance]);
+      // 1. Insert unified Work with composition date in metadata
+      const workMetadata = { date: finalDate };
+      await client.query('INSERT INTO aby.works(id,owner_id,title,metadata,provenance) VALUES($1,$2,$3,$4,$5)', [workId, ownerId, workTitle, workMetadata, provenance]);
 
       let mainAssetId = '';
       let mainAsset: Asset | undefined;
@@ -459,6 +466,7 @@ export class PostgresAbyRepository implements AbyRepository {
           title: workTitle, 
           recordingTitle: track.recordingTitle,
           creator: finalCreator,
+          date: finalDate,
           releaseDate: finalReleaseDate,
           label: finalLabel,
           catalogNumber: finalCatalogNumber,

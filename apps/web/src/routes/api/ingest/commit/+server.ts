@@ -11,6 +11,7 @@ export const POST: RequestHandler = (event) => api('ingest.commit', async () => 
     input.workTitle,
     input.recordingTitle,
     input.creator,
+    input.date,
     input.releaseDate,
     input.label,
     input.catalogNumber
