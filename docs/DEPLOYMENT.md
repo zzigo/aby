@@ -26,14 +26,14 @@ The command uses the `hetzner` SSH host alias and `ExitOnForwardFailure`; all re
 
 ## Release sequence
 
-1. Fast-forward `/opt/apps/aby` to a reviewed commit.
-2. Run `npx --yes bun@1.3.14 install --frozen-lockfile`.
-3. Run `npx --yes bun@1.3.14 run validate`.
-4. Run `npx --yes bun@1.3.14 run logto:provision` when identity is not configured or redirect URIs change.
-5. Load `.env` and run `npx --yes bun@1.3.14 run db:migrate`.
-6. Build and `pm2 reload aby-web --update-env`.
-7. Verify health, Logto redirect/callback and an authenticated API request.
-8. Validate Caddy before any reload.
+1. Push reviewed commits to GitHub from local workspace: `git push`.
+2. SSH to the VPS and pull: `ssh hetzner "cd /opt/apps/aby && git pull"`.
+3. Install dependencies on VPS: `npx --yes bun@1.3.14 install --frozen-lockfile`.
+4. Run validation on VPS: `npx --yes bun@1.3.14 run validate`.
+5. Run database migrations: `npx --yes bun@1.3.14 --env-file=.env run db:migrate`.
+6. Build client and server bundles: `npx --yes bun@1.3.14 --env-file=.env run build`.
+7. Reload the PM2 process: `pm2 reload aby-web --update-env`.
+8. Verify public health status from `https://aby.zztt.org/api/health`.
 
 ## Public endpoint
 
