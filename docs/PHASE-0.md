@@ -60,3 +60,7 @@ aby/
 3. Media Session and background playback require browser/device verification, especially iOS.
 4. Large-video presigned playback needs Range/CORS verification against the selected Wasabi bucket.
 5. Qdrant dimensions cannot be fixed before model artifacts and versions are selected.
+
+## VPS organization
+
+The operational root is `/opt/apps/aby`, owned by `zz`. Aby reserves loopback port `4332`, immediately after Seshat's `4331`. PostgreSQL and Qdrant remain shared infrastructure but Aby receives a dedicated database role/database and namespaced schema/collections. `scripts/tunnel-vps.sh` forwards app, database and Qdrant ports without exposing them on public interfaces.

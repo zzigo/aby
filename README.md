@@ -47,3 +47,12 @@ docs                     Architecture, boundaries, operations and roadmap
 
 See [Phase 0](docs/PHASE-0.md) for assumptions and validation scope.
 
+## VPS workspace and tunnel
+
+The production checkout lives at `/opt/apps/aby`, runs as the `zz` user and binds only to `127.0.0.1:4332`. Open the standard development tunnel with:
+
+```bash
+bun run tunnel:vps
+```
+
+The single SSH session exposes Aby at `localhost:4332`, PostgreSQL at `localhost:55432` and Qdrant at `localhost:56333`. Secrets remain in `/opt/apps/aby/.env`; the tunnel does not make any remote service publicly reachable.

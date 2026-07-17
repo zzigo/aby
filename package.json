@@ -17,7 +17,8 @@
     "lint": "eslint . --max-warnings=0",
     "test": "bun test",
     "validate": "bun run lint && bun run typecheck && bun run test && bun run build",
-    "db:migrate": "bun scripts/migrate.ts"
+    "db:migrate": "bun scripts/migrate.ts",
+    "tunnel:vps": "bash scripts/tunnel-vps.sh"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.2",
@@ -32,4 +33,3 @@
     "node": ">=22"
   }
 }
-
