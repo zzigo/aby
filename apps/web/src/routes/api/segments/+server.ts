@@ -7,7 +7,9 @@ export const POST: RequestHandler = (event) => api('segment.create', async () =>
   const ownerId = ownerFor(event);
   const input = SegmentCreateSchema.parse(await jsonBody(event));
   const segment = await getRepository().createSegment(ownerId, input, {
-    method: 'human', source: 'aby.inspect.manual-selection', actorId: ownerId,
+    method: 'human',
+    source: input.sourceContext === 'mobile_draft' ? 'aby.player.mobile-capture' : 'aby.inspect.manual-selection',
+    actorId: ownerId,
     parameters: {}, timestamp: new Date().toISOString(), reviewState: 'accepted',
     reviewedBy: ownerId, reviewedAt: new Date().toISOString()
   });

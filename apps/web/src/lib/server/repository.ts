@@ -158,7 +158,8 @@ export class MemoryAbyRepository implements AbyRepository {
             id: segment.id,
             startTimeMs: segment.startTimeMs,
             endTimeMs: segment.endTimeMs,
-            ...(segment.label ? { label: segment.label } : {})
+            ...(segment.label ? { label: segment.label } : {}),
+            ...(segment.sourceContext ? { sourceContext: segment.sourceContext } : {})
           }))
       }));
   }
@@ -487,7 +488,8 @@ export class PostgresAbyRepository implements AbyRepository {
           'id',s.id,
           'startTimeMs',s.start_time_ms,
           'endTimeMs',s.end_time_ms,
-          'label',s.label
+          'label',s.label,
+          'sourceContext',s.source_context
         ) ORDER BY s.start_time_ms) FILTER (WHERE s.id IS NOT NULL),'[]'::jsonb) AS segments
        FROM aby.assets a
        JOIN aby.recordings r ON r.id=a.recording_id
@@ -509,11 +511,12 @@ export class PostgresAbyRepository implements AbyRepository {
         ...(imageCandidate?.url ? { coverUrl: imageCandidate.url } : {}),
         ...(asset.canonicalMetadata.releaseDate ? { releaseDate: asset.canonicalMetadata.releaseDate } : {}),
         ...(asset.canonicalMetadata.label ? { label: asset.canonicalMetadata.label } : {}),
-        segments: row.segments.map((segment: { id: string; startTimeMs: number | string; endTimeMs: number | string; label?: string | null }) => ({
+        segments: row.segments.map((segment: { id: string; startTimeMs: number | string; endTimeMs: number | string; label?: string | null; sourceContext?: string }) => ({
           id: segment.id,
           startTimeMs: Number(segment.startTimeMs),
           endTimeMs: Number(segment.endTimeMs),
-          ...(segment.label ? { label: segment.label } : {})
+          ...(segment.label ? { label: segment.label } : {}),
+          ...(segment.sourceContext ? { sourceContext: segment.sourceContext } : {})
         }))
       };
     });
@@ -525,9 +528,9 @@ export class PostgresAbyRepository implements AbyRepository {
     const createdAt = new Date().toISOString();
     await this.#pool.query(
       `INSERT INTO aby.segments
-       (id,owner_id,asset_id,start_time_ms,end_time_ms,channel_selection,fade_in_ms,fade_out_ms,label,state,provenance,created_at)
-       VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,'accepted',$10,$11)`,
-      [id, ownerId, input.assetId, input.startTimeMs, input.endTimeMs, input.channelSelection, input.fadeInMs, input.fadeOutMs, input.label ?? null, provenance, createdAt]
+       (id,owner_id,asset_id,start_time_ms,end_time_ms,channel_selection,fade_in_ms,fade_out_ms,label,state,provenance,created_at,source_context)
+       VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,'accepted',$10,$11,$12)`,
+      [id, ownerId, input.assetId, input.startTimeMs, input.endTimeMs, input.channelSelection, input.fadeInMs, input.fadeOutMs, input.label ?? null, provenance, createdAt, input.sourceContext]
     );
     return { id, ownerId, ...input, provenance, state: 'accepted', createdAt };
   }

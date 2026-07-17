@@ -3,7 +3,7 @@
   import type { CatalogItem, CatalogSegment } from '@zztt/aby-domain';
   import type { PageData } from './$types';
   import { formatDuration } from '$lib/presentation';
-  import { currentPlayback, loadPlayback, loadSegmentPlayback } from '$lib/player';
+  import { currentPlayback, currentPlaybackTimeMs, loadPlayback, loadSegmentPlayback } from '$lib/player';
   import SpectrogramView from '$lib/components/SpectrogramView.svelte';
 
   const views = ['Cover', 'Spectrogram'] as const;
@@ -146,6 +146,78 @@
       message = error instanceof Error ? error.message : 'Segment playback failed';
     }
   }
+
+  let isPressing = $state(false);
+  let pointerStartMs = 0;
+  let audioStartPlaybackTimeMs = 0;
+
+  function handlePointerDown(event: PointerEvent) {
+    if (!$currentPlayback) return;
+    (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
+    isPressing = true;
+    pointerStartMs = Date.now();
+    audioStartPlaybackTimeMs = $currentPlaybackTimeMs;
+  }
+
+  async function handlePointerUp(event: PointerEvent) {
+    if (!isPressing) return;
+    isPressing = false;
+    (event.currentTarget as HTMLElement).releasePointerCapture(event.pointerId);
+    const pressDuration = Date.now() - pointerStartMs;
+    const currentAudioTime = $currentPlaybackTimeMs;
+
+    let startMs = 0;
+    let endMs = 0;
+
+    if (pressDuration < 500) {
+      // Tap: last 5 seconds
+      startMs = Math.max(0, currentAudioTime - 5000);
+      endMs = currentAudioTime;
+    } else {
+      // Press & Hold: duration of press
+      startMs = audioStartPlaybackTimeMs;
+      endMs = currentAudioTime;
+    }
+
+    if (endMs > startMs) {
+      await saveMobileSegment(startMs, endMs);
+    }
+  }
+
+  function handlePointerCancel(event: PointerEvent) {
+    if (!isPressing) return;
+    isPressing = false;
+    (event.currentTarget as HTMLElement).releasePointerCapture(event.pointerId);
+  }
+
+  async function saveMobileSegment(startMs: number, endMs: number) {
+    try {
+      const response = await fetch('/api/segments', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          assetId: $currentPlayback!.assetId,
+          startTimeMs: Math.round(startMs),
+          endTimeMs: Math.round(endMs),
+          sourceContext: 'mobile_draft',
+          label: 'Mobile Capture'
+        })
+      });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error?.message ?? 'Failed to save segment');
+      
+      // Reload catalog
+      const catalogResponse = await fetch('/api/catalog');
+      const catalogBody = await catalogResponse.json();
+      if (catalogResponse.ok) {
+        items = catalogBody.items;
+      }
+      message = `Saved draft: ${formatDuration(startMs)} – ${formatDuration(endMs)}`;
+      setTimeout(() => { if (message.startsWith('Saved draft')) message = ''; }, 4000);
+    } catch (error) {
+      message = error instanceof Error ? error.message : 'Failed to save segment';
+    }
+  }
 </script>
 
 <svelte:head>
@@ -185,6 +257,18 @@
 
     <button class="view-arrow previous" onclick={() => selectView(-1)} aria-label="Previous visualization">←</button>
     <button class="view-arrow next" onclick={() => selectView(1)} aria-label="Next visualization">→</button>
+    {#if $currentPlayback}
+      <button 
+        class="master-capture-btn" 
+        onpointerdown={handlePointerDown} 
+        onpointerup={handlePointerUp}
+        onpointercancel={handlePointerCancel}
+        style="position: absolute; right: 24px; bottom: 120px; width: 72px; height: 72px; border-radius: 50%; border: 2px solid {isPressing ? 'var(--signal)' : 'var(--line)'}; background: {isPressing ? 'var(--signal)' : 'rgba(23, 24, 23, 0.85)'}; color: {isPressing ? '#101110' : 'var(--signal)'}; display: grid; place-items: center; cursor: pointer; z-index: 15; box-shadow: 0 8px 32px rgba(0,0,0,0.5); backdrop-filter: blur(8px); transition: transform 0.15s, background 0.15s; font-size: 11px; font-weight: 700; font-family: ui-monospace, monospace; user-select: none;"
+        aria-label="Capture segment"
+      >
+        {isPressing ? 'RECORD' : 'CAPTURE'}
+      </button>
+    {/if}
     <div class="view-switcher" aria-label="Visualization selector">
       {#each views as view, index (view)}
         <button class:active={viewIndex === index} onclick={() => viewIndex = index}>{view}</button>

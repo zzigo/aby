@@ -10,6 +10,7 @@ export interface PlaybackItem {
 }
 
 export const currentPlayback = writable<PlaybackItem | null>(null);
+export const currentPlaybackTimeMs = writable<number>(0);
 
 export async function loadPlayback(assetId: string, title: string, subtitle: string): Promise<void> {
   const response = await fetch(`/api/assets/${encodeURIComponent(assetId)}/playback`);

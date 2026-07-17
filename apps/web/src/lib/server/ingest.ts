@@ -9,6 +9,7 @@ import { AbyError } from './errors';
 import { readConfig } from './config';
 import { recordingFolderName } from './catalog-path';
 import { identifyWithMusicBrainz } from './musicbrainz';
+import { fetchWikidataEntity } from './wikidata';
 import type { AbyRepository } from './repository';
 import { assertSourceObjectKey, downloadWasabiSourceObject, headWasabiSourceObject, normalizeObjectKey } from './storage';
 
@@ -70,6 +71,7 @@ export async function inspectWasabiSource(
     const identification = input.mediaKind === 'aud'
       ? await identifyWithMusicBrainz({ creator: input.creatorDisplay, workTitle: input.workTitle, durationMs: inspected.metadata.durationMs })
       : null;
+    const wikidata = input.creatorDisplay ? await fetchWikidataEntity(input.creatorDisplay) : null;
     const recordingTitle = input.recordingTitle || identification?.recordingTitle || input.workTitle;
     const recordingFolder = recordingFolderName({
       ...(identification?.releaseDate ? { releaseDate: identification.releaseDate } : {}),
@@ -140,7 +142,8 @@ export async function inspectWasabiSource(
         collectionCode: input.collectionCode,
         canonicalObjectKey: targetObjectKey,
         identificationCandidates,
-        imageCandidates
+        imageCandidates,
+        ...(wikidata ? { wikidata } : {})
       },
       provenance: {
         method: 'calculated',

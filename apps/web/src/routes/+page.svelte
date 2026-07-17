@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { onMount } from 'svelte';
   import type { Asset, IngestPreview, Segment } from '@zztt/aby-domain';
   import type { PageData } from './$types';
   import { loadPlayback, loadSegmentPlayback } from '$lib/player';
@@ -15,7 +16,19 @@
   let endTimeMs = $state(700);
   let status = $state('Ready for one bounded inspection.');
   let busy = $state(false);
+  let autoSeparation = $state(true);
   let requiresPromotion = $derived(Boolean(preview?.candidateMetadata.canonicalObjectKey && preview.candidateMetadata.canonicalObjectKey !== preview.objectKey));
+
+  onMount(() => {
+    const userId = data.user?.id ?? 'anonymous';
+    autoSeparation = localStorage.getItem(`aby.config.auto-separation:${userId}`) !== 'false';
+  });
+
+  function toggleAutoSeparation() {
+    autoSeparation = !autoSeparation;
+    const userId = data.user?.id ?? 'anonymous';
+    localStorage.setItem(`aby.config.auto-separation:${userId}`, String(autoSeparation));
+  }
 
   async function request(path: string, body: unknown) {
     const response = await fetch(path, {
@@ -28,27 +41,45 @@
     return value;
   }
 
-  async function inspectFirstWork() {
+  async function surpriseMe() {
     busy = true;
-    status = 'Reading one Wasabi object, calculating SHA-256 and consulting MusicBrainz…';
+    status = 'Checking Wasabi storage for untracked sources…';
     try {
+      const response = await fetch('/api/ingest/sources');
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error?.message ?? 'Failed to load source list');
+      
+      const sources = body.sources;
+      if (!sources || sources.length === 0) {
+        status = 'No legacy sources found to catalog.';
+        return;
+      }
+      
+      // Pick a random source
+      const randomIndex = Math.floor(Math.random() * sources.length);
+      const selectedSource = sources[randomIndex];
+      
+      status = `Picked: ${selectedSource.objectKey}. Inspecting...`;
+      
       const result = await request('/api/ingest/preview', {
-        sourceObjectKey: 'ref/20 late/Gavin Bryars/The Sinking of the Titanic/Sinking of the Titanic.mp3',
-        mediaKind: 'aud',
-        collectionCode: '20L',
-        entitySlug: 'bryars',
-        creatorDisplay: 'Gavin Bryars',
-        workTitle: 'The Sinking of the Titanic',
+        sourceObjectKey: selectedSource.objectKey,
+        mediaKind: selectedSource.mediaKind,
+        collectionCode: selectedSource.collectionCode,
+        entitySlug: selectedSource.entitySlug,
+        creatorDisplay: selectedSource.creatorDisplay,
+        workTitle: selectedSource.workTitle,
+        recordingTitle: selectedSource.recordingTitle,
         analyze: false
       });
+      
       preview = result.preview;
       workTitle = preview!.candidateMetadata.title;
       recordingTitle = preview!.candidateMetadata.recordingTitle;
       asset = null;
       segment = null;
-      status = 'Real candidate ready. Wasabi remains unchanged until reviewed promotion.';
+      status = `Inspected: ${preview!.objectKey}. Real candidate ready.`;
     } catch (error) {
-      status = error instanceof Error ? error.message : 'Inspection failed';
+      status = error instanceof Error ? error.message : 'Surprise discovery failed';
     } finally {
       busy = false;
     }
@@ -142,6 +173,12 @@
       <p>Aby keeps the original file untouched, separates machine candidates from canonical metadata, and treats segments as temporal references before they become files.</p>
       {#if data.user}
         <div class="identity"><span>{data.user.name || data.user.email || 'Logto user'}</span><small>Shared Logto identity</small><form method="POST" action="?/signOut"><button class="secondary">Sign out</button></form></div>
+        <div class="config-panel" style="margin-top: 12px; padding: 12px; border: 1px solid var(--line); background: var(--surface); display: flex; align-items: center; justify-content: space-between; font-size: 13px;">
+          <span style="color: var(--muted);">Separación automática (BS-Roformer)</span>
+          <button class="config-toggle" class:active={autoSeparation} onclick={toggleAutoSeparation} style="padding: 6px 12px; font-size: 11px; font-family: ui-monospace, monospace; border: 1px solid var(--line); background: {autoSeparation ? 'var(--signal)' : 'transparent'}; color: {autoSeparation ? '#101110' : '#fff'}; font-weight: {autoSeparation ? '700' : '400'}; transition: 0.15s;">
+            {autoSeparation ? 'ACTIVADA' : 'DESACTIVADA'}
+          </button>
+        </div>
       {:else}
         <form method="POST" action="?/signIn"><button class="primary">Continue with Logto</button></form>
       {/if}
@@ -151,9 +188,9 @@
   <section class="workflow" aria-label="Ingest workflow">
     <article class:complete={Boolean(preview)}>
       <header><span>01</span><h2>Inspect</h2></header>
-      <p>{data.user ? 'Inspect the selected Gavin Bryars object without scanning the rest of ref/.' : 'Authentication uses the same Logto identity as Seshat and Musiki.'}</p>
+      <p>{data.user ? 'Scan legacy source pools and pick a random candidate to adopt.' : 'Authentication uses the same Logto identity as Seshat and Musiki.'}</p>
       {#if data.user}
-        <button class="primary" onclick={inspectFirstWork} disabled={busy}>Inspect first Wasabi work</button>
+        <button class="primary" onclick={surpriseMe} disabled={busy}>Surprise me!</button>
       {:else}
         <button class="secondary" disabled>Sign in first</button>
       {/if}
@@ -207,6 +244,21 @@
         {#if preview.candidateMetadata.identificationCandidates?.[0]}
           <!-- eslint-disable-next-line svelte/no-navigation-without-resolve -->
           <div><dt>MusicBrainz</dt><dd><a href={preview.candidateMetadata.identificationCandidates[0].canonicalUrl} target="_blank" rel="noreferrer">{preview.candidateMetadata.identificationCandidates[0].title}</a> · {Math.round(preview.candidateMetadata.identificationCandidates[0].score * 100)}% candidate</dd></div>
+        {/if}
+        {#if preview.candidateMetadata.wikidata}
+          <div>
+            <dt>Wikidata</dt>
+            <dd>
+              <strong style="color: var(--signal);">{preview.candidateMetadata.wikidata.label}</strong> ({preview.candidateMetadata.wikidata.qid})
+              {#if preview.candidateMetadata.wikidata.birthDate}
+                <small style="display: block; color: var(--muted); margin-top: 2px;">Born: {preview.candidateMetadata.wikidata.birthDate}</small>
+              {/if}
+              <p style="margin: 6px 0 0; font-size: 12px; line-height: 1.4; color: var(--muted);">{preview.candidateMetadata.wikidata.description}</p>
+              {#if preview.candidateMetadata.wikidata.imageUrl}
+                <img src={preview.candidateMetadata.wikidata.imageUrl} alt={preview.candidateMetadata.wikidata.label} style="display: block; max-width: 140px; margin-top: 8px; border: 1px solid var(--line);" />
+              {/if}
+            </dd>
+          </div>
         {/if}
         {#if preview.candidateMetadata.imageCandidates?.[0]}
           <div><dt>Feature image</dt><dd><img class="feature-candidate" src={preview.candidateMetadata.imageCandidates[0].url} alt="Candidate feature art" /><small>{preview.candidateMetadata.imageCandidates[0].exactRelease ? 'Exact release cover' : 'Release-group fallback; requires confirmation'}</small></dd></div>

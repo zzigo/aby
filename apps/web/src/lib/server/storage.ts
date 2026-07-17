@@ -1,4 +1,4 @@
-import { CopyObjectCommand, DeleteObjectCommand, GetObjectCommand, HeadObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import { CopyObjectCommand, DeleteObjectCommand, GetObjectCommand, HeadObjectCommand, PutObjectCommand, S3Client, ListObjectsV2Command } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { createWriteStream } from 'node:fs';
 import { readFile } from 'node:fs/promises';
@@ -167,4 +167,32 @@ export async function playbackUrl(asset: Asset): Promise<{ url: string; expiresA
     ResponseContentDisposition: `inline; filename="${asset.originalFilename.replace(/["\r\n]/g, '_')}"`
   }), { expiresIn });
   return { url, expiresAt: new Date(Date.now() + expiresIn * 1000).toISOString() };
+}
+
+export async function listWasabiSourceKeys(): Promise<string[]> {
+  const config = readConfig();
+  const bucket = config.WASABI_BUCKET!;
+  const root = config.wasabiRootPrefix ? normalizeObjectKey(config.wasabiRootPrefix).replace(/\/+$/, '') + '/' : '';
+  const keys: string[] = [];
+
+  for (const prefix of [config.sourceAudioPrefix, config.sourceVideoPrefix]) {
+    const physicalPrefix = `${root}${prefix}`;
+    const response = await wasabiClient().send(new ListObjectsV2Command({
+      Bucket: bucket,
+      Prefix: physicalPrefix
+    }));
+
+    if (response.Contents) {
+      for (const obj of response.Contents) {
+        if (!obj.Key || obj.Key.endsWith('/')) continue;
+        let logicalKey = obj.Key;
+        if (root && logicalKey.startsWith(root)) {
+          logicalKey = logicalKey.substring(root.length);
+        }
+        keys.push(logicalKey);
+      }
+    }
+  }
+
+  return keys;
 }

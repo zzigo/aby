@@ -21,12 +21,15 @@ describe('preview-before-write repository flow', () => {
     const asset = await repository.commitPreview('owner-a', preview.id, 'Accepted work', 'Accepted recording');
     expect(asset.canonicalMetadata.title).toBe('Accepted work');
     const segment = await repository.createSegment('owner-a', {
-      assetId: asset.id, startTimeMs: 100, endTimeMs: 400, channelSelection: [], fadeInMs: 0, fadeOutMs: 0
+      assetId: asset.id, startTimeMs: 100, endTimeMs: 400, channelSelection: [], fadeInMs: 0, fadeOutMs: 0,
+      sourceContext: 'mobile_draft'
     }, { method: 'human', source: 'test', actorId: 'owner-a', parameters: {}, timestamp: new Date().toISOString(), reviewState: 'accepted' });
     expect(segment.endTimeMs).toBe(400);
+    expect(segment.sourceContext).toBe('mobile_draft');
     const catalog = await repository.listCatalog('owner-a');
     expect(catalog[0]?.workTitle).toBe('Accepted work');
     expect(catalog[0]?.segments[0]?.startTimeMs).toBe(100);
+    expect(catalog[0]?.segments[0]?.sourceContext).toBe('mobile_draft');
   });
 
   test('does not leak assets across owners', async () => {

@@ -6,6 +6,9 @@ export type Identifier = z.infer<typeof IdentifierSchema>;
 export const ReviewStateSchema = z.enum(['candidate', 'accepted', 'rejected']);
 export type ReviewState = z.infer<typeof ReviewStateSchema>;
 
+export const SourceContextSchema = z.enum(['manual_selection', 'mobile_draft', 'studio_validated', 'auto_boundary']);
+export type SourceContext = z.infer<typeof SourceContextSchema>;
+
 export const ProvenanceSchema = z.object({
   method: z.enum(['calculated', 'registered', 'human', 'imported', 'inferred']),
   source: z.string().min(1),
@@ -68,7 +71,14 @@ export const CandidateMetadataSchema = z.object({
     exactRelease: z.boolean(),
     sourceId: z.string().min(1),
     provenance: z.record(z.string(), z.unknown()).default({})
-  })).optional()
+  })).optional(),
+  wikidata: z.object({
+    qid: z.string(),
+    label: z.string(),
+    description: z.string(),
+    imageUrl: z.string().url().optional(),
+    birthDate: z.string().optional()
+  }).optional()
 });
 export type CandidateMetadata = z.infer<typeof CandidateMetadataSchema>;
 
@@ -149,7 +159,8 @@ export const CatalogSegmentSchema = z.object({
   id: IdentifierSchema,
   startTimeMs: z.number().int().nonnegative(),
   endTimeMs: z.number().int().positive(),
-  label: z.string().optional()
+  label: z.string().optional(),
+  sourceContext: SourceContextSchema.optional()
 });
 export type CatalogSegment = z.infer<typeof CatalogSegmentSchema>;
 
@@ -172,7 +183,8 @@ export const SegmentCreateSchema = z.object({
   channelSelection: z.array(z.number().int().nonnegative()).default([]),
   fadeInMs: z.number().int().nonnegative().default(0),
   fadeOutMs: z.number().int().nonnegative().default(0),
-  label: z.string().trim().max(500).optional()
+  label: z.string().trim().max(500).optional(),
+  sourceContext: SourceContextSchema.default('manual_selection')
 }).superRefine((value, context) => {
   if (value.endTimeMs <= value.startTimeMs) {
     context.addIssue({ code: 'custom', path: ['endTimeMs'], message: 'endTimeMs must be greater than startTimeMs' });
