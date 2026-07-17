@@ -111,9 +111,9 @@ export async function generateSpectrogramAnalysis(
       '-filter_complex', `[0:a:0]${filter}[spectrogram]`, '-map', '[spectrogram]',
       '-c:v', 'png', '-frames:v', '1', outputPath
     ], config.FFMPEG_ANALYSIS_TIMEOUT_MS);
-    const observations = await readObservations(config.FFMPEG_PATH, inputPath, config.FFMPEG_ANALYSIS_TIMEOUT_MS);
     const artifactObjectKey = spectrogramArtifactKey(asset);
     await uploadWasabiArtifact(artifactObjectKey, outputPath, 'image/png');
+    const observations = await readObservations(config.FFMPEG_PATH, inputPath, config.FFMPEG_ANALYSIS_TIMEOUT_MS);
     const toolVersion = await ffmpegVersion(config.FFMPEG_PATH, 10_000);
     return repository.saveSpectrogramAnalysis(ownerId, asset, {
       artifactObjectKey,
