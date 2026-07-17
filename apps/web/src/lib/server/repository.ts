@@ -38,7 +38,8 @@ export interface AbyRepository {
     date?: string,
     releaseDate?: string,
     label?: string,
-    catalogNumber?: string
+    catalogNumber?: string,
+    trackOverrides?: Array<{ objectKey: string; recordingTitle: string; trackNumber?: number }>
   ): Promise<Asset>;
   listCatalog(ownerId: string): Promise<CatalogItem[]>;
   getCatalogItem(ownerId: string, assetId: string): Promise<CatalogItem | null>;
@@ -110,7 +111,8 @@ export class MemoryAbyRepository implements AbyRepository {
     date?: string,
     releaseDate?: string,
     label?: string,
-    catalogNumber?: string
+    catalogNumber?: string,
+    trackOverrides?: Array<{ objectKey: string; recordingTitle: string; trackNumber?: number }>
   ): Promise<Asset> {
     const preview = this.#previews.get(previewId);
     if (!preview || preview.ownerId !== ownerId) throw new AbyError('preview_not_found', 'Ingest preview not found', 404);
@@ -155,10 +157,14 @@ export class MemoryAbyRepository implements AbyRepository {
     const finalReleaseDate = releaseDate !== undefined ? releaseDate : preview.candidateMetadata.releaseDate;
     const finalLabel = label !== undefined ? label : preview.candidateMetadata.label;
     const finalCatalogNumber = catalogNumber !== undefined ? catalogNumber : preview.candidateMetadata.catalogNumber;
+    const overrides = new Map(trackOverrides?.map((track) => [track.objectKey, track]) ?? []);
 
     let mainAsset: Asset | undefined;
 
     for (const track of tracks) {
+      const override = overrides.get(track.objectKey);
+      const finalTrackTitle = override?.recordingTitle ?? track.recordingTitle;
+      const finalTrackNumber = override?.trackNumber ?? track.trackNumber;
       const duplicateChecksum = [...this.#assets.values()].find(
         (value) => value.ownerId === ownerId && value.checksumSha256 === track.checksumSha256
       );
@@ -174,9 +180,9 @@ export class MemoryAbyRepository implements AbyRepository {
         canonicalMetadata: { 
           ...preview.candidateMetadata, 
           title: workTitle, 
-          recordingTitle: track.recordingTitle, 
+          recordingTitle: finalTrackTitle,
           ...(albumTitle || preview.candidateMetadata.albumTitle ? { albumTitle: albumTitle || preview.candidateMetadata.albumTitle } : {}),
-          ...(track.trackNumber !== undefined ? { trackNumber: track.trackNumber } : {}),
+          ...(finalTrackNumber !== undefined ? { trackNumber: finalTrackNumber } : {}),
           creator: finalCreator,
           date: finalDate,
           releaseDate: finalReleaseDate,
@@ -422,7 +428,8 @@ export class PostgresAbyRepository implements AbyRepository {
     date?: string,
     releaseDate?: string,
     label?: string,
-    catalogNumber?: string
+    catalogNumber?: string,
+    trackOverrides?: Array<{ objectKey: string; recordingTitle: string; trackNumber?: number }>
   ): Promise<Asset> {
     const client = await this.#pool.connect();
     try {
@@ -467,6 +474,7 @@ export class PostgresAbyRepository implements AbyRepository {
       const finalReleaseDate = releaseDate !== undefined ? releaseDate : preview.candidate_metadata.releaseDate;
       const finalLabel = label !== undefined ? label : preview.candidate_metadata.label;
       const finalCatalogNumber = catalogNumber !== undefined ? catalogNumber : preview.candidate_metadata.catalogNumber;
+      const overrides = new Map(trackOverrides?.map((track) => [track.objectKey, track]) ?? []);
 
       // Lock all locations and checksums
       const lockKeys = [];
@@ -500,6 +508,9 @@ export class PostgresAbyRepository implements AbyRepository {
 
       // 2. Insert all tracks
       for (const track of tracks) {
+        const override = overrides.get(track.objectKey);
+        const finalTrackTitle = override?.recordingTitle ?? track.recordingTitle;
+        const finalTrackNumber = override?.trackNumber ?? track.trackNumber;
         const recordingId = randomUUID();
         const assetId = randomUUID();
 
@@ -540,9 +551,9 @@ export class PostgresAbyRepository implements AbyRepository {
         const canonicalMetadata = { 
           ...preview.candidate_metadata, 
           title: workTitle, 
-          recordingTitle: track.recordingTitle,
+          recordingTitle: finalTrackTitle,
           albumTitle: finalAlbumTitle,
-          trackNumber: track.trackNumber,
+          trackNumber: finalTrackNumber,
           creator: finalCreator,
           date: finalDate,
           releaseDate: finalReleaseDate,
@@ -555,13 +566,13 @@ export class PostgresAbyRepository implements AbyRepository {
           releaseDate: finalReleaseDate,
           label: finalLabel,
           catalogNumber: finalCatalogNumber,
-          trackNumber: track.trackNumber,
+          trackNumber: finalTrackNumber,
           identificationCandidates: preview.candidate_metadata.identificationCandidates
         };
 
         await client.query(
           'INSERT INTO aby.recordings(id,owner_id,work_id,album_id,title,metadata,provenance) VALUES($1,$2,$3,$4,$5,$6,$7)',
-          [recordingId, ownerId, workId, albumId ?? null, track.recordingTitle, recordingMetadata, provenance]
+          [recordingId, ownerId, workId, albumId ?? null, finalTrackTitle, recordingMetadata, provenance]
         );
 
         const originalObjectKey = track.sourceObjectKey ?? (typeof preview.provenance.parameters?.sourceObjectKey === 'string'

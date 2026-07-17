@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import { SvelteURLSearchParams } from 'svelte/reactivity';
   import type { Asset, IngestPreview, Segment } from '@zztt/aby-domain';
   import type { PageData } from './$types';
   import { loadPlayback, loadSegmentPlayback } from '$lib/player';
@@ -18,6 +19,7 @@
   let releaseDate = $state('');
   let label = $state('');
   let catalogNumber = $state('');
+  let trackEdits = $state<Array<{ objectKey: string; recordingTitle: string; trackNumber?: number }>>([]);
   let startTimeMs = $state(100);
   let endTimeMs = $state(700);
   let status = $state('Ready for one bounded inspection.');
@@ -73,11 +75,30 @@
     return value;
   }
 
+  function applyPreview(nextPreview: IngestPreview, preservedTracks: typeof trackEdits = []) {
+    preview = nextPreview;
+    workTitle = nextPreview.candidateMetadata.title;
+    recordingTitle = nextPreview.candidateMetadata.recordingTitle;
+    albumTitle = nextPreview.candidateMetadata.albumTitle || '';
+    creator = nextPreview.candidateMetadata.creator || '';
+    date = nextPreview.candidateMetadata.date || '';
+    releaseDate = nextPreview.candidateMetadata.releaseDate || '';
+    label = nextPreview.candidateMetadata.label || '';
+    catalogNumber = nextPreview.candidateMetadata.catalogNumber || '';
+    trackEdits = (nextPreview.candidateMetadata.tracks ?? []).map((track, index) => ({
+      objectKey: track.objectKey,
+      recordingTitle: preservedTracks[index]?.recordingTitle || track.recordingTitle,
+      ...(track.trackNumber !== undefined ? { trackNumber: track.trackNumber } : {})
+    }));
+    asset = null;
+    segment = null;
+  }
+
   async function surpriseMe() {
     busy = true;
     status = 'Checking Wasabi storage for untracked sources…';
     try {
-      const response = await fetch('/api/ingest/sources');
+      const response = await fetch('/api/ingest/sources?mode=random');
       const body = await response.json();
       if (!response.ok) throw new Error(body.error?.message ?? 'Failed to load source list');
       
@@ -87,9 +108,7 @@
         return;
       }
       
-      // Pick a random source
-      const randomIndex = Math.floor(Math.random() * sources.length);
-      const selectedSource = sources[randomIndex];
+      const selectedSource = sources[0];
       
       status = `Picked: ${selectedSource.objectKey}. Inspecting...`;
       
@@ -104,18 +123,8 @@
         analyze: false
       });
       
-      preview = result.preview;
-      workTitle = preview!.candidateMetadata.title;
-      recordingTitle = preview!.candidateMetadata.recordingTitle;
-      albumTitle = preview!.candidateMetadata.albumTitle || '';
-      creator = preview!.candidateMetadata.creator || '';
-      date = preview!.candidateMetadata.date || '';
-      releaseDate = preview!.candidateMetadata.releaseDate || '';
-      label = preview!.candidateMetadata.label || '';
-      catalogNumber = preview!.candidateMetadata.catalogNumber || '';
-      asset = null;
-      segment = null;
-      status = `Inspected: ${preview!.objectKey}. Real candidate ready.`;
+      applyPreview(result.preview);
+      status = `Inspected: ${result.preview.objectKey}. Real candidate ready.`;
     } catch (error) {
       status = error instanceof Error ? error.message : 'Surprise discovery failed';
     } finally {
@@ -135,32 +144,37 @@
   let showSurfList = $state(false);
   let loadingSurf = $state(false);
   let surfQuery = $state('');
+  let surfTotal = $state(0);
+  let surfSearchTimer: ReturnType<typeof setTimeout> | undefined;
 
-  const filteredSurfSources = $derived(
-    surfQuery.trim() === ''
-      ? surfSources
-      : surfSources.filter((s) => 
-          s.objectKey.toLowerCase().includes(surfQuery.toLowerCase()) ||
-          s.creatorDisplay.toLowerCase().includes(surfQuery.toLowerCase()) ||
-          s.workTitle.toLowerCase().includes(surfQuery.toLowerCase())
-        )
-  );
+  async function loadSurfSources(query = surfQuery) {
+    loadingSurf = true;
+    try {
+      const params = new SvelteURLSearchParams({ mode: 'surf', limit: '150' });
+      if (query.trim()) params.set('q', query.trim());
+      const response = await fetch(`/api/ingest/sources?${params}`);
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error?.message ?? 'Failed to load source list');
+      surfSources = body.sources || [];
+      surfTotal = body.total || 0;
+    } catch (error) {
+      status = error instanceof Error ? error.message : 'Failed to load source list';
+      surfSources = [];
+      surfTotal = 0;
+    } finally {
+      loadingSurf = false;
+    }
+  }
+
+  function queueSurfSearch() {
+    clearTimeout(surfSearchTimer);
+    surfSearchTimer = setTimeout(() => loadSurfSources(), 300);
+  }
 
   async function toggleSurf() {
     showSurfList = !showSurfList;
     if (showSurfList && surfSources.length === 0) {
-      loadingSurf = true;
-      try {
-        const response = await fetch('/api/ingest/sources');
-        const body = await response.json();
-        if (response.ok) {
-          surfSources = body.sources || [];
-        }
-      } catch (error) {
-        console.error('Failed to load surf sources:', error);
-      } finally {
-        loadingSurf = false;
-      }
+      await loadSurfSources('');
     }
   }
 
@@ -179,18 +193,8 @@
         recordingTitle: selectedSource.recordingTitle,
         analyze: false
       });
-      preview = result.preview;
-      workTitle = preview!.candidateMetadata.title;
-      recordingTitle = preview!.candidateMetadata.recordingTitle;
-      albumTitle = preview!.candidateMetadata.albumTitle || '';
-      creator = preview!.candidateMetadata.creator || '';
-      date = preview!.candidateMetadata.date || '';
-      releaseDate = preview!.candidateMetadata.releaseDate || '';
-      label = preview!.candidateMetadata.label || '';
-      catalogNumber = preview!.candidateMetadata.catalogNumber || '';
-      asset = null;
-      segment = null;
-      status = `Inspected: ${preview!.objectKey}. Real candidate ready.`;
+      applyPreview(result.preview);
+      status = `Inspected: ${result.preview.objectKey}. Real candidate ready.`;
     } catch (error) {
       status = error instanceof Error ? error.message : 'Inspection failed';
     } finally {
@@ -211,7 +215,8 @@
         date,
         releaseDate,
         label,
-        catalogNumber
+        catalogNumber,
+        ...(trackEdits.length > 1 ? { tracks: trackEdits } : {})
       });
       asset = result.asset;
       status = 'Work, recording and asset committed explicitly.';
@@ -228,7 +233,7 @@
     status = 'Copying one object to Aby and verifying its SHA-256…';
     try {
       const result = await request('/api/ingest/promote', { previewId: preview.id });
-      preview = result.preview;
+      applyPreview(result.preview, trackEdits);
       status = `Canonical copy verified. ${result.sourceRetirement.objectKey} is now a deletion candidate; the source remains intact.`;
     } catch (error) {
       status = error instanceof Error ? error.message : 'Promotion failed';
@@ -310,20 +315,19 @@
 
         {#if showSurfList}
           <div style="margin-top: 12px; border: 1px solid var(--line); padding: 12px; background: #131412; max-height: 280px; display: flex; flex-direction: column; gap: 8px; overflow: hidden; z-index: 10;">
-            <input 
-              type="text" 
-              bind:value={surfQuery} 
-              placeholder="Filter by name, creator, or path..." 
-              style="width: 100%; font-size: 11px; padding: 8px; background: #0c0d0c; border: 1px solid var(--line); color: #fff; font-family: ui-monospace, monospace; box-sizing: border-box;"
-            />
+            <div class="surf-search">
+              <input type="text" bind:value={surfQuery} oninput={queueSurfSearch} placeholder="Search all ref / mov…" />
+              <button onclick={() => loadSurfSources(surfQuery)} aria-label="Refresh source sample">↻</button>
+            </div>
+            <small class="surf-count">{surfQuery.trim() ? `${surfTotal} matches` : `${surfSources.length} sampled from ${surfTotal}`}</small>
             
             {#if loadingSurf}
               <div style="color: var(--muted); font-size: 11px; font-family: ui-monospace, monospace; padding: 8px 0;">Scanning Wasabi...</div>
-            {:else if filteredSurfSources.length === 0}
+            {:else if surfSources.length === 0}
               <div style="color: var(--muted); font-size: 11px; font-family: ui-monospace, monospace; padding: 8px 0;">No matching sources found.</div>
             {:else}
               <div style="overflow-y: auto; flex: 1; display: flex; flex-direction: column; gap: 4px; padding-right: 4px;">
-                {#each filteredSurfSources as src (src.objectKey)}
+                {#each surfSources as src (src.objectKey)}
                   <button 
                     onclick={() => selectSurfSource(src)}
                     class="surf-item-btn"
@@ -350,7 +354,7 @@
       {#if preview}
         <label>Work title<input bind:value={workTitle} /></label>
         <label>Album (optional)<input bind:value={albumTitle} placeholder="Direct track when empty" /></label>
-        <label>Track title<input bind:value={recordingTitle} /></label>
+        {#if trackEdits.length <= 1}<label>Track title<input bind:value={recordingTitle} /></label>{/if}
         <label>Artist/s<input bind:value={creator} /></label>
         <div style="display: flex; gap: 12px; margin-bottom: 12px;">
           <label style="flex: 1; margin: 0;">Year (Composition)<input bind:value={date} style="width: 100%; box-sizing: border-box;" /></label>
@@ -368,16 +372,12 @@
             <p style="font-size: 11px; color: var(--muted); margin: 0 0 10px 0; line-height: 1.4;">
               Tracks remain under the same Work and optional Album.
             </p>
-            <div style="max-height: 150px; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; padding-right: 4px;">
-              {#each preview.candidateMetadata.tracks as track (track.objectKey)}
-                <div style="font-size: 10px; font-family: ui-monospace, monospace; border-bottom: 1px dashed #20221f; padding: 4px 0; display: flex; justify-content: space-between; gap: 8px;">
-                  <span style="color: #fff; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 60%;" title={track.originalFilename}>
-                    {track.trackNumber ? `${String(track.trackNumber).padStart(2, '0')} · ` : ''}{track.originalFilename}
-                  </span>
-                  <span style="color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 40%; text-align: right;">
-                    {track.recordingTitle}
-                  </span>
-                </div>
+            <div class="collective-tracks">
+              {#each trackEdits as track, index (track.objectKey)}
+                <label>
+                  <span>{track.trackNumber ? String(track.trackNumber).padStart(2, '0') : String(index + 1).padStart(2, '0')}</span>
+                  <input bind:value={track.recordingTitle} aria-label={`Track ${track.trackNumber ?? index + 1} title`} />
+                </label>
               {/each}
             </div>
           </div>
@@ -495,6 +495,8 @@
     background-color: rgba(198, 255, 82, 0.08);
     outline: none;
   }
+  .surf-search{display:grid;grid-template-columns:1fr auto}.surf-search input{width:100%;font-size:11px;padding:8px;background:#0c0d0c;border:1px solid var(--line);color:#fff;font-family:ui-monospace,monospace;box-sizing:border-box}.surf-search button{border:1px solid var(--line);border-left:0;background:#0c0d0c;color:var(--signal);padding:0 12px}.surf-count{font:9px ui-monospace,monospace;color:var(--muted)}
+  .collective-tracks{max-height:240px;overflow-y:auto;display:grid;gap:5px;padding-right:4px}.collective-tracks label{display:grid;grid-template-columns:30px 1fr;align-items:center;margin:0}.collective-tracks label span{font:10px ui-monospace,monospace;color:var(--signal)}.collective-tracks input{margin:0!important;padding:7px!important;font-size:11px!important}
   .setup-section{margin-top:72px;border:1px solid var(--line);background:var(--surface)}
   .setup-section>header{display:flex;gap:18px;align-items:baseline;padding:18px 22px;border-bottom:1px solid var(--line)}
   .setup-section>header span{font:10px ui-monospace,monospace;color:var(--signal)}.setup-section h2{margin:0;font-size:18px;font-weight:500}

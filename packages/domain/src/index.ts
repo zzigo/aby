@@ -160,7 +160,12 @@ export const CommitIngestSchema = z.object({
   date: z.string().trim().max(500).optional(),
   releaseDate: z.string().trim().max(500).optional(),
   label: z.string().trim().max(500).optional(),
-  catalogNumber: z.string().trim().max(500).optional()
+  catalogNumber: z.string().trim().max(500).optional(),
+  tracks: z.array(z.object({
+    objectKey: z.string().min(1),
+    recordingTitle: z.string().trim().min(1).max(500),
+    trackNumber: z.number().int().positive().optional()
+  })).optional()
 });
 export type CommitIngest = z.infer<typeof CommitIngestSchema>;
 

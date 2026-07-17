@@ -2,6 +2,7 @@ import { CopyObjectCommand, DeleteObjectCommand, GetObjectCommand, HeadObjectCom
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { createWriteStream } from 'node:fs';
 import { readFile } from 'node:fs/promises';
+import { extname } from 'node:path';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import type { Asset } from '@zztt/aby-domain';
@@ -177,21 +178,26 @@ export async function listWasabiSourceKeys(): Promise<string[]> {
 
   for (const prefix of [config.sourceAudioPrefix, config.sourceVideoPrefix]) {
     const physicalPrefix = `${root}${prefix}`;
-    const response = await wasabiClient().send(new ListObjectsV2Command({
-      Bucket: bucket,
-      Prefix: physicalPrefix
-    }));
+    let continuationToken: string | undefined;
+    do {
+      const response = await wasabiClient().send(new ListObjectsV2Command({
+        Bucket: bucket,
+        Prefix: physicalPrefix,
+        ContinuationToken: continuationToken
+      }));
 
-    if (response.Contents) {
-      for (const obj of response.Contents) {
-        if (!obj.Key || obj.Key.endsWith('/')) continue;
-        let logicalKey = obj.Key;
-        if (root && logicalKey.startsWith(root)) {
-          logicalKey = logicalKey.substring(root.length);
+      if (response.Contents) {
+        for (const obj of response.Contents) {
+          if (!obj.Key || obj.Key.endsWith('/')) continue;
+          const ext = extname(obj.Key).toLowerCase();
+          if (!['.mp3', '.wav', '.m4a', '.flac', '.ogg', '.aac', '.mp4', '.mov'].includes(ext)) continue;
+          let logicalKey = obj.Key;
+          if (root && logicalKey.startsWith(root)) logicalKey = logicalKey.substring(root.length);
+          keys.push(logicalKey);
         }
-        keys.push(logicalKey);
       }
-    }
+      continuationToken = response.IsTruncated ? response.NextContinuationToken : undefined;
+    } while (continuationToken);
   }
 
   return keys;

@@ -51,6 +51,30 @@ describe('preview-before-write repository flow', () => {
     expect(await repository.listCatalog('owner-a')).toHaveLength(0);
   });
 
+  test('commits individual titles for every track in a collective folder', async () => {
+    const repository = new MemoryAbyRepository();
+    const collective = fixturePreview();
+    collective.candidateMetadata.tracks = [
+      {
+        objectKey: collective.objectKey, canonicalObjectKey: collective.objectKey,
+        originalFilename: '01. FIRST.wav', checksumSha256: collective.checksumSha256,
+        technicalMetadata: collective.technicalMetadata, recordingTitle: 'FIRST', trackNumber: 1
+      },
+      {
+        objectKey: 'aby/aud/demo/02-SECOND.wav', canonicalObjectKey: 'aby/aud/demo/02-SECOND.wav',
+        originalFilename: '02. SECOND.wav', checksumSha256: 'b'.repeat(64),
+        technicalMetadata: collective.technicalMetadata, recordingTitle: 'SECOND', trackNumber: 2
+      }
+    ];
+    const preview = await repository.savePreview(collective);
+    await repository.commitPreview('owner-a', preview.id, 'Collective work', 'FIRST', 'Album', undefined, undefined, undefined, undefined, undefined, [
+      { objectKey: collective.objectKey, recordingTitle: 'First edited', trackNumber: 1 },
+      { objectKey: 'aby/aud/demo/02-SECOND.wav', recordingTitle: 'Second edited', trackNumber: 2 }
+    ]);
+    const catalog = await repository.listCatalog('owner-a');
+    expect(catalog.map((item) => item.recordingTitle)).toEqual(['First edited', 'Second edited']);
+  });
+
   test('promotion switches authority and preserves the source as retirement provenance', async () => {
     const repository = new MemoryAbyRepository();
     const source = fixturePreview();

@@ -15,7 +15,8 @@ export const POST: RequestHandler = (event) => api('ingest.commit', async () => 
     input.date,
     input.releaseDate,
     input.label,
-    input.catalogNumber
+    input.catalogNumber,
+    input.tracks
   );
   return { asset, event: { type: 'aby.asset.committed.v1', assetId: asset.id, ownerId: asset.ownerId, occurredAt: new Date().toISOString() } };
 });
