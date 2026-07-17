@@ -1,27 +1,39 @@
 # Storage
 
-## Boundary
+## Canonical and legacy boundaries
 
-Aby reserves `aby/media/` at the bucket root. Existing Seshat code uses `zzttuntref/libros`, `zzttuntref/lseshat/<user>` and `zzttuntref/seshat-derived`; Musiki uses a separate Cloudflare R2 adapter. The new prefix therefore makes ownership visible and avoids collision without moving any object.
+The private Wasabi bucket `zzttuntref` has two existing source pools:
 
 ```text
-aby/media/
-├── originals/<sha256-prefix>/<sha256>/original.ext
-├── derivatives/
-│   ├── playback/
-│   ├── waveform/
-│   ├── spectrogram/
-│   ├── thumbnails/
-│   ├── transcripts/
-│   └── analysis/
-└── exports/
+ref/   legacy audio reference archive
+mov/   legacy cinema archive
 ```
 
-Phase 0 does not upload, move, rename or duplicate objects. Registration preserves `original_filename`, `original_object_key`, `original_directory`, SHA-256, import batch, import time and provider.
+They are not sanitized in place and are not Aby's permanent namespace. Aby adopts one selected work at a time into:
 
-## Access
+```text
+aby/
+├── aud/   canonical audio
+└── mov/   canonical cinema
+```
 
-Wasabi stays private. The server validates ownership and key prefix, then returns a presigned GET URL whose TTL is clamped to 60–900 seconds (default 300). The VPS does not proxy normal playback bytes. Clip generation and transcoding may use isolated workers later.
+The duplicate word `mov` is intentional and unambiguous because the full keys differ: `mov/...` is legacy; `aby/mov/...` is canonical. Cloudflare R2 is not an Aby data source.
 
-Analysis begins from masters or controlled PCM derivatives, never a compressed playback derivative when a better source exists. Segments are database intervals; cached clips are disposable derivatives.
+## Authority during transition
 
+There is exactly one active binary authority per asset.
+
+1. Before promotion, the legacy key is active.
+2. Preview records the legacy key, SHA-256, technical metadata and proposed canonical key.
+3. Promotion performs a server-side copy because S3 has no native rename.
+4. Aby verifies size, checksum, ffprobe identity and playback at the destination.
+5. PostgreSQL switches the asset's active object key only after verification.
+6. Retirement of the legacy object is a separate, explicit step.
+
+The original filename, object key, directory, provider, checksum, import batch and timestamps remain permanently recorded as provenance. The system must never leave two objects marked active.
+
+## Access and derived material
+
+Wasabi stays private. The server validates ownership and the canonical `aby/` key before returning a presigned GET URL whose TTL is clamped to 60–900 seconds. The VPS does not proxy normal playback bytes.
+
+Later derived files remain subordinate to their asset and carry tool/version/checksum provenance. Analysis starts from the master or a controlled PCM derivative. Segments remain database intervals; cached clips are disposable derivatives.

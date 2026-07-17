@@ -15,7 +15,9 @@ export async function jsonBody(event: RequestEvent): Promise<unknown> {
 
 export function ownerFor(event: RequestEvent): string {
   const production = process.env.NODE_ENV === 'production';
-  if (production) throw new AbyError('authentication_required', 'Logto session validation is required before production use', 401);
+  const subject = event.locals.user?.sub?.trim();
+  if (subject) return subject;
+  if (production) throw new AbyError('authentication_required', 'Sign in through the shared Logto identity to use Aby', 401);
   return event.request.headers.get('x-aby-owner')?.trim() || 'phase-0-local-user';
 }
 
@@ -35,4 +37,3 @@ export async function api<T>(operation: string, callback: (traceId: string) => P
     });
   }
 }
-

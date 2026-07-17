@@ -8,7 +8,7 @@ Its canonical model is:
 Work -> Recording -> Asset -> Segment
 ```
 
-PostgreSQL owns identity, metadata, ACLs, relations, provenance and job state. Private binaries remain in Wasabi under the reserved `aby/media/` prefix. Qdrant is a derived, reconstructible index. Seshat, Musiki and GLIP are sibling bounded contexts consumed only through authenticated APIs, SDKs and events.
+PostgreSQL owns identity, metadata, ACLs, relations, provenance and job state. Private binaries remain in Wasabi. `ref/` and `mov/` are legacy source pools; objects are adopted one at a time into the canonical `aby/aud/` and `aby/mov/` trees after an inspectable preview. Qdrant is a derived, reconstructible index. Seshat, Musiki and GLIP are sibling bounded contexts consumed only through authenticated APIs, SDKs and events.
 
 ## Phase 0 baseline
 
@@ -19,6 +19,8 @@ PostgreSQL owns identity, metadata, ACLs, relations, provenance and job state. P
 - PostgreSQL migration for the `aby` schema.
 - Wasabi adapter with strict prefix validation and short-lived presigned playback URLs.
 - Preview-before-write ingest flow, a local audio fixture, canonical commit and manual segment creation.
+- Bounded one-object Wasabi preview with SHA-256, ffprobe, MusicBrainz candidates, Cover Art Archive provenance and a proposed human-readable destination.
+- Dedicated Logto client on the shared issuer, preserving cross-application SSO and stable subject ownership.
 
 The fixture repository is development/test-only and deliberately non-canonical. Production refuses to use it. Configure `DATABASE_URL`, apply the migration, provision a dedicated Logto application and configure Wasabi before any deployment.
 
@@ -47,6 +49,7 @@ docs                     Architecture, boundaries, operations and roadmap
 
 See [Phase 0](docs/PHASE-0.md) for assumptions and validation scope.
 See [VPS deployment](docs/DEPLOYMENT.md) for the live layout, tunnel and release sequence.
+See [Cataloging](docs/CATALOGING.md) for the canonical Wasabi tree, three-letter codes and object-by-object adoption protocol.
 
 ## VPS workspace and tunnel
 

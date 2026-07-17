@@ -4,9 +4,11 @@
 
 Independent repo, contracts, schema, storage adapter, health endpoint and a fixture-backed preview/commit/playback/manual-segment slice.
 
-## Phase 1 — private library
+## Phase 1 — private library (in progress)
 
 Dedicated Logto app, PostgreSQL deployment, Wasabi object discovery, bounded scan jobs, embedded tags, Chromaprint candidates, MusicBrainz/AcoustID inspection, persistent queue and mobile playback controls.
+
+Current bounded slice: one manually selected legacy Wasabi object, SHA-256/ffprobe inspection, MusicBrainz duration match, feature-image candidate, canonical path preview and persistent PostgreSQL candidate. No bulk scan, MIR or source deletion.
 
 ## Phase 2 — deterministic analysis
 
@@ -24,5 +26,4 @@ Human-reviewed candidate-to-TAE workflow, GLILY/GLINO links and provenance-prese
 
 Micro/meso/macro hierarchies, novelty curves, timbral trajectories, work comparison and corpus navigation.
 
-The next vertical slice should be one-object Wasabi discovery with an explicit analysis switch and persistent PostgreSQL candidate state, after the external credentials/client decisions are authorized.
-
+The next vertical slice is verified promotion of the reviewed candidate: server-side copy, destination hash/metadata/playback verification, atomic authority switch, mobile playback and separately confirmed source retirement.

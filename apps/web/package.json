@@ -8,11 +8,13 @@
     "build": "vite build",
     "preview": "vite preview",
     "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
-    "db:migrate": "bun scripts/migrate.ts"
+    "db:migrate": "bun scripts/migrate.ts",
+    "ingest:preview": "bun scripts/preview-wasabi.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1089.0",
     "@aws-sdk/s3-request-presigner": "^3.1089.0",
+    "@logto/sveltekit": "^0.3.23",
     "@zztt/aby-domain": "workspace:*",
     "@zztt/aby-media-ingest": "workspace:*",
     "pg": "^8.22.0",

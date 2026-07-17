@@ -31,11 +31,10 @@ Expensive media work runs outside request handlers. Phase 0 executes `ffprobe` o
 ## Sources of truth
 
 - PostgreSQL `aby` schema: canonical operational state.
-- Wasabi `aby/media/`: private original and derivative binaries.
+- Wasabi `aby/aud/` and `aby/mov/`: canonical private binaries adopted gradually from legacy `ref/` and `mov/` source pools.
 - Qdrant `aby_*`: derived embeddings, always rebuildable.
 - Seshat: bibliography and documents.
 - Musiki: its product domain and Cloudflare R2 objects.
 - GLIP: validated TAE/GLILY/GLINO semantics.
 
 See [ADR 0001](adr/0001-aby-app-capability.md).
-

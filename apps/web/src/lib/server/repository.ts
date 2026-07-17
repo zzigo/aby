@@ -28,6 +28,9 @@ export class MemoryAbyRepository implements AbyRepository {
   async commitPreview(ownerId: string, previewId: string, workTitle: string, recordingTitle: string): Promise<Asset> {
     const preview = this.#previews.get(previewId);
     if (!preview || preview.ownerId !== ownerId) throw new AbyError('preview_not_found', 'Ingest preview not found', 404);
+    if (preview.candidateMetadata.canonicalObjectKey && preview.candidateMetadata.canonicalObjectKey !== preview.objectKey) {
+      throw new AbyError('promotion_required', 'The source must be copied, verified and promoted before canonical commit', 409);
+    }
     const existing = [...this.#assets.values()].find((value) => value.provenance.jobId === preview.id);
     if (existing) return structuredClone(existing);
     const now = new Date().toISOString();
@@ -98,6 +101,9 @@ export class PostgresAbyRepository implements AbyRepository {
         await client.query('COMMIT');
         return mapAsset(existing.rows[0]);
       }
+      if (preview.candidate_metadata.canonicalObjectKey && preview.candidate_metadata.canonicalObjectKey !== preview.object_key) {
+        throw new AbyError('promotion_required', 'The source must be copied, verified and promoted before canonical commit', 409);
+      }
       const now = new Date().toISOString();
       const workId = randomUUID();
       const recordingId = randomUUID();
@@ -161,4 +167,3 @@ export function getRepository(): AbyRepository {
   else throw new AbyError('database_not_configured', 'DATABASE_URL is required outside local demo mode', 503);
   return repository;
 }
-

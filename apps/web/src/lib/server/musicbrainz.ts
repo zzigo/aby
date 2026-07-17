@@ -1,0 +1,176 @@
+import { AbyError } from './errors';
+import { readConfig } from './config';
+
+interface MusicBrainzArtistCredit {
+  name?: string;
+  artist?: { id?: string; name?: string };
+}
+
+interface MusicBrainzRecording {
+  id: string;
+  title: string;
+  length?: number;
+  score?: number;
+  'artist-credit'?: MusicBrainzArtistCredit[];
+  releases?: Array<{ id: string; title?: string; date?: string; country?: string }>;
+}
+
+interface MusicBrainzRelease {
+  id: string;
+  title: string;
+  date?: string;
+  country?: string;
+  status?: string;
+  'release-group'?: { id?: string; title?: string };
+  'label-info'?: Array<{ 'catalog-number'?: string; label?: { id?: string; name?: string } }>;
+}
+
+interface CoverArtDocument {
+  release?: string;
+  images?: Array<{
+    id: string;
+    front?: boolean;
+    approved?: boolean;
+    thumbnails?: Record<string, string>;
+    image?: string;
+  }>;
+}
+
+export interface MusicBrainzIdentification {
+  recordingId: string;
+  recordingTitle: string;
+  recordingLengthMs?: number;
+  artistId?: string;
+  artistName: string;
+  releaseId?: string;
+  releaseTitle?: string;
+  releaseDate?: string;
+  releaseCountry?: string;
+  releaseGroupId?: string;
+  label?: string;
+  labelId?: string;
+  catalogNumber?: string;
+  score: number;
+  cover?: {
+    url: string;
+    exactRelease: boolean;
+    sourceId: string;
+    sourceRelease?: string;
+  };
+}
+
+interface IdentifyOptions {
+  fetcher?: typeof fetch;
+  musicBrainzIntervalMs?: number;
+}
+
+const normalizeName = (value: string) => value
+  .normalize('NFKD')
+  .replace(/[\u0300-\u036f]/g, '')
+  .toLowerCase()
+  .replace(/[^a-z0-9]+/g, ' ')
+  .trim();
+
+const quoted = (value: string) => `"${value.replaceAll('\\', '\\\\').replaceAll('"', '\\"')}"`;
+
+async function jsonRequest<T>(fetcher: typeof fetch, url: URL, userAgent: string): Promise<T> {
+  const response = await fetcher(url, { headers: { accept: 'application/json', 'user-agent': userAgent } });
+  if (!response.ok) throw new AbyError('external_metadata_failed', `External metadata request failed with HTTP ${response.status}`, 502);
+  return response.json() as Promise<T>;
+}
+
+async function optionalCoverArt(fetcher: typeof fetch, url: URL, userAgent: string): Promise<CoverArtDocument | null> {
+  const response = await fetcher(url, { headers: { accept: 'application/json', 'user-agent': userAgent }, redirect: 'follow' });
+  if (response.status === 404) return null;
+  if (!response.ok) throw new AbyError('cover_art_failed', `Cover Art Archive request failed with HTTP ${response.status}`, 502);
+  return response.json() as Promise<CoverArtDocument>;
+}
+
+const sleep = (milliseconds: number) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+
+export async function identifyWithMusicBrainz(
+  input: { creator: string; workTitle: string; durationMs: number },
+  options: IdentifyOptions = {}
+): Promise<MusicBrainzIdentification | null> {
+  const config = readConfig();
+  const fetcher = options.fetcher ?? fetch;
+  const userAgent = `Aby/0.1.0 (${config.ABY_EXTERNAL_METADATA_CONTACT})`;
+  const query = `artist:${quoted(input.creator)} AND recording:${quoted(input.workTitle)}`;
+  const searchUrl = new URL(`${config.MUSICBRAINZ_BASE_URL.replace(/\/+$/, '')}/recording/`);
+  searchUrl.searchParams.set('query', query);
+  searchUrl.searchParams.set('fmt', 'json');
+  searchUrl.searchParams.set('limit', '25');
+  const search = await jsonRequest<{ recordings?: MusicBrainzRecording[] }>(fetcher, searchUrl, userAgent);
+  const creator = normalizeName(input.creator);
+  const title = normalizeName(input.workTitle);
+  const recordings = (search.recordings ?? []).filter((candidate) => {
+    const candidateArtist = candidate['artist-credit']?.map((credit) => credit.name || credit.artist?.name || '').join(' ') ?? '';
+    return normalizeName(candidate.title) === title && normalizeName(candidateArtist).includes(creator);
+  });
+  recordings.sort((left, right) => {
+    const durationDelta = (candidate: MusicBrainzRecording) => candidate.length === undefined
+      ? Number.MAX_SAFE_INTEGER
+      : Math.abs(candidate.length - input.durationMs);
+    return durationDelta(left) - durationDelta(right) || (right.score ?? 0) - (left.score ?? 0);
+  });
+  const recording = recordings[0];
+  if (!recording) return null;
+  const durationDelta = recording.length === undefined ? Number.MAX_SAFE_INTEGER : Math.abs(recording.length - input.durationMs);
+  const releaseSummary = recording.releases?.[0];
+  let release: MusicBrainzRelease | undefined;
+  if (releaseSummary) {
+    await sleep(options.musicBrainzIntervalMs ?? 1_100);
+    const releaseUrl = new URL(`${config.MUSICBRAINZ_BASE_URL.replace(/\/+$/, '')}/release/${releaseSummary.id}`);
+    releaseUrl.searchParams.set('fmt', 'json');
+    releaseUrl.searchParams.set('inc', 'artist-credits+labels+release-groups');
+    release = await jsonRequest<MusicBrainzRelease>(fetcher, releaseUrl, userAgent);
+  }
+  const labelInfo = release?.['label-info']?.[0];
+  const releaseGroupId = release?.['release-group']?.id;
+  let coverDocument: CoverArtDocument | null = null;
+  let exactRelease = true;
+  if (release?.id) {
+    coverDocument = await optionalCoverArt(
+      fetcher,
+      new URL(`${config.COVER_ART_ARCHIVE_BASE_URL.replace(/\/+$/, '')}/release/${release.id}/`),
+      userAgent
+    );
+  }
+  if (!coverDocument && releaseGroupId) {
+    exactRelease = false;
+    coverDocument = await optionalCoverArt(
+      fetcher,
+      new URL(`${config.COVER_ART_ARCHIVE_BASE_URL.replace(/\/+$/, '')}/release-group/${releaseGroupId}/`),
+      userAgent
+    );
+  }
+  const image = coverDocument?.images?.find((candidate) => candidate.front && candidate.approved !== false)
+    ?? coverDocument?.images?.find((candidate) => candidate.approved !== false);
+  const imageUrl = image?.thumbnails?.['500'] ?? image?.thumbnails?.large ?? image?.image;
+  const artist = recording['artist-credit']?.[0];
+  const score = durationDelta <= 1_000 ? 0.99 : durationDelta <= 5_000 ? 0.95 : Math.min(0.9, (recording.score ?? 0) / 100);
+  return {
+    recordingId: recording.id,
+    recordingTitle: recording.title,
+    ...(recording.length !== undefined ? { recordingLengthMs: recording.length } : {}),
+    ...(artist?.artist?.id ? { artistId: artist.artist.id } : {}),
+    artistName: artist?.name || artist?.artist?.name || input.creator,
+    ...(release?.id ? { releaseId: release.id } : {}),
+    ...(release?.title ? { releaseTitle: release.title } : {}),
+    ...(release?.date ? { releaseDate: release.date } : {}),
+    ...(release?.country ? { releaseCountry: release.country } : {}),
+    ...(releaseGroupId ? { releaseGroupId } : {}),
+    ...(labelInfo?.label?.name ? { label: labelInfo.label.name } : {}),
+    ...(labelInfo?.label?.id ? { labelId: labelInfo.label.id } : {}),
+    ...(labelInfo?.['catalog-number'] ? { catalogNumber: labelInfo['catalog-number'] } : {}),
+    score,
+    ...(image && imageUrl ? {
+      cover: {
+        url: imageUrl.replace(/^http:/, 'https:'),
+        exactRelease,
+        sourceId: image.id,
+        ...(coverDocument?.release ? { sourceRelease: coverDocument.release } : {})
+      }
+    } : {})
+  };
+}

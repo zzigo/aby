@@ -12,14 +12,22 @@ const EnvironmentSchema = z.object({
   WASABI_BUCKET: optionalText,
   WASABI_ACCESS_KEY_ID: optionalText,
   WASABI_SECRET_ACCESS_KEY: optionalText,
-  ABY_STORAGE_PREFIX: z.string().trim().default('aby/media/'),
+  ABY_STORAGE_PREFIX: z.string().trim().default('aby/'),
+  ABY_AUDIO_PREFIX: z.string().trim().default('aby/aud/'),
+  ABY_VIDEO_PREFIX: z.string().trim().default('aby/mov/'),
+  ABY_SOURCE_AUDIO_PREFIX: z.string().trim().default('ref/'),
+  ABY_SOURCE_VIDEO_PREFIX: z.string().trim().default('mov/'),
+  ABY_INGEST_MAX_SOURCE_BYTES: z.coerce.number().int().positive().default(1_073_741_824),
   ABY_PRESIGNED_URL_TTL_SECONDS: z.coerce.number().int().min(60).max(900).default(300),
   FFPROBE_PATH: z.string().trim().default('ffprobe'),
   FFPROBE_TIMEOUT_MS: z.coerce.number().int().min(1_000).max(120_000).default(30_000),
   LOGTO_ISSUER_URL: optionalText,
   LOGTO_CLIENT_ID: optionalText,
   LOGTO_CLIENT_SECRET: optionalText,
-  QDRANT_URL: optionalText
+  QDRANT_URL: optionalText,
+  MUSICBRAINZ_BASE_URL: z.string().url().default('https://musicbrainz.org/ws/2'),
+  COVER_ART_ARCHIVE_BASE_URL: z.string().url().default('https://coverartarchive.org'),
+  ABY_EXTERNAL_METADATA_CONTACT: z.string().trim().default('https://aby.zztt.org')
 });
 
 export type AbyConfig = ReturnType<typeof readConfig>;
@@ -29,17 +37,31 @@ export function readConfig(environment: NodeJS.ProcessEnv = process.env) {
   const production = env.NODE_ENV === 'production';
   const demoMode = env.ABY_DEMO_MODE ? env.ABY_DEMO_MODE === 'true' : !production;
   if (production && demoMode) throw new Error('ABY_DEMO_MODE cannot be enabled in production');
-  const normalizedPrefix = env.ABY_STORAGE_PREFIX.replaceAll('\\', '/').replace(/^\/+/, '').replace(/\/+$/, '') + '/';
-  if (normalizedPrefix !== 'aby/media/') throw new Error('ABY_STORAGE_PREFIX must remain inside the reserved aby/media/ boundary');
+  const normalizePrefix = (value: string) => value.replaceAll('\\', '/').replace(/^\/+/, '').replace(/\/+$/, '') + '/';
+  const normalizedPrefix = normalizePrefix(env.ABY_STORAGE_PREFIX);
+  const audioPrefix = normalizePrefix(env.ABY_AUDIO_PREFIX);
+  const videoPrefix = normalizePrefix(env.ABY_VIDEO_PREFIX);
+  const sourceAudioPrefix = normalizePrefix(env.ABY_SOURCE_AUDIO_PREFIX);
+  const sourceVideoPrefix = normalizePrefix(env.ABY_SOURCE_VIDEO_PREFIX);
+  if (normalizedPrefix !== 'aby/') throw new Error('ABY_STORAGE_PREFIX must be the canonical aby/ boundary');
+  if (!audioPrefix.startsWith(normalizedPrefix) || !videoPrefix.startsWith(normalizedPrefix) || audioPrefix === videoPrefix) {
+    throw new Error('Aby audio and video prefixes must be distinct children of aby/');
+  }
+  if (sourceAudioPrefix.startsWith(normalizedPrefix) || sourceVideoPrefix.startsWith(normalizedPrefix)) {
+    throw new Error('Legacy source prefixes must remain outside the canonical aby/ boundary');
+  }
   return {
     ...env,
     production,
     demoMode,
     storagePrefix: normalizedPrefix,
+    audioPrefix,
+    videoPrefix,
+    sourceAudioPrefix,
+    sourceVideoPrefix,
     databaseConfigured: Boolean(env.DATABASE_URL),
     wasabiConfigured: Boolean(env.WASABI_ENDPOINT && env.WASABI_REGION && env.WASABI_BUCKET && env.WASABI_ACCESS_KEY_ID && env.WASABI_SECRET_ACCESS_KEY),
     logtoConfigured: Boolean(env.LOGTO_ISSUER_URL && env.LOGTO_CLIENT_ID && env.LOGTO_CLIENT_SECRET),
     qdrantConfigured: Boolean(env.QDRANT_URL)
   };
 }
-

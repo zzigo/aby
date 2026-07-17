@@ -24,13 +24,13 @@
 
 The current Aby prompt supersedes the older proposal's provisional “Media Library” name and shared-core diagram. The Systems MOC's bounded-context and cross-system rules govern filesystem and integration decisions. The ontology and media pipeline from the older specification remain authoritative where they do not conflict.
 
-The initial local Phase 0 created no external state. The subsequent VPS baseline provisions an independent checkout, PostgreSQL database/schema, PM2 process and Caddy route. It reuses the existing Wasabi bucket only through the isolated `aby/media/` prefix and does not create objects or Qdrant collections. A dedicated Logto application remains pending.
+The initial local Phase 0 created no external state. The subsequent VPS baseline provisions an independent checkout, PostgreSQL database/schema, PM2 process and Caddy route. The storage boundary was subsequently refined: `ref/` and `mov/` are legacy source pools, while `aby/aud/` and `aby/mov/` are canonical destinations populated one verified object at a time. A dedicated Logto application remains pending.
 
 ## Validation
 
 - `bun run lint`: clean.
 - `bun run typecheck`: packages compile and `svelte-check` reports 0 errors/0 warnings.
-- `bun test`: 8 passing tests covering domain intervals, opt-in analysis, SHA-256, ffprobe parsing, owner isolation and storage-prefix enforcement.
+- `bun test`: the baseline suite covers domain intervals, opt-in analysis, SHA-256, ffprobe parsing, owner isolation and storage-prefix enforcement; Phase 1 adds catalog-code, legacy-source and MusicBrainz candidate tests.
 - `bun run build`: SvelteKit production build succeeds with Vite 7.3.6 and the official Node adapter.
 - HTTP smoke: health, fixture inspection, candidate preview, canonical commit, playback URL and manual segment creation all succeed in sequence.
 - Local migration execution was unavailable because the workstation has PostgreSQL client tools but no server. The migration was subsequently applied on the VPS to the dedicated `aby` database and verified with 14 tables in schema `aby`, owned by `aby_app`.

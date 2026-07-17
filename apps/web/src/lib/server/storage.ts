@@ -1,5 +1,8 @@
 import { GetObjectCommand, HeadObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
+import { createWriteStream } from 'node:fs';
+import { Readable } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
 import type { Asset } from '@zztt/aby-domain';
 import { AbyError } from './errors';
 import { readConfig } from './config';
@@ -8,10 +11,18 @@ export function normalizeObjectKey(value: string): string {
   return value.normalize('NFC').replaceAll('\\', '/').replace(/^\/+/, '').replace(/\/{2,}/g, '/');
 }
 
-export function assertAbyObjectKey(value: string, prefix = 'aby/media/'): string {
+export function assertAbyObjectKey(value: string, prefix = 'aby/'): string {
   const key = normalizeObjectKey(value);
   if (!key || key.split('/').some((part) => !part || part === '.' || part === '..') || !key.startsWith(prefix)) {
     throw new AbyError('invalid_storage_key', `Object key must remain below ${prefix}`, 400);
+  }
+  return key;
+}
+
+export function assertSourceObjectKey(value: string, prefixes = ['ref/', 'mov/']): string {
+  const key = normalizeObjectKey(value);
+  if (!key || key.split('/').some((part) => !part || part === '.' || part === '..') || !prefixes.some((prefix) => key.startsWith(prefix))) {
+    throw new AbyError('invalid_source_key', `Source object key must remain below ${prefixes.join(' or ')}`, 400);
   }
   return key;
 }
@@ -41,6 +52,23 @@ export async function headWasabiObject(objectKey: string) {
   return { objectKey: key, sizeBytes: response.ContentLength, contentType: response.ContentType, etag: response.ETag };
 }
 
+export async function headWasabiSourceObject(objectKey: string) {
+  const config = readConfig();
+  const key = assertSourceObjectKey(objectKey, [config.sourceAudioPrefix, config.sourceVideoPrefix]);
+  const response = await wasabiClient().send(new HeadObjectCommand({ Bucket: config.WASABI_BUCKET!, Key: key }));
+  return { objectKey: key, sizeBytes: response.ContentLength, contentType: response.ContentType, etag: response.ETag };
+}
+
+export async function downloadWasabiSourceObject(objectKey: string, destinationPath: string): Promise<void> {
+  const config = readConfig();
+  const key = assertSourceObjectKey(objectKey, [config.sourceAudioPrefix, config.sourceVideoPrefix]);
+  const response = await wasabiClient().send(new GetObjectCommand({ Bucket: config.WASABI_BUCKET!, Key: key }));
+  if (!(response.Body instanceof Readable)) {
+    throw new AbyError('source_stream_unavailable', 'Wasabi did not return a readable source stream', 502);
+  }
+  await pipeline(response.Body, createWriteStream(destinationPath, { flags: 'wx' }));
+}
+
 export async function playbackUrl(asset: Asset): Promise<{ url: string; expiresAt: string }> {
   const config = readConfig();
   if (asset.provider === 'local-fixture') {
@@ -55,4 +83,3 @@ export async function playbackUrl(asset: Asset): Promise<{ url: string; expiresA
   }), { expiresIn });
   return { url, expiresAt: new Date(Date.now() + expiresIn * 1000).toISOString() };
 }
-

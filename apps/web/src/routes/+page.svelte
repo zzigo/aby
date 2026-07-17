@@ -1,6 +1,9 @@
 <script lang="ts">
   import type { Asset, IngestPreview, Segment } from '@zztt/aby-domain';
+  import type { PageData } from './$types';
   import { loadPlayback } from '$lib/player';
+
+  let { data }: { data: PageData } = $props();
 
   let preview = $state<IngestPreview | null>(null);
   let asset = $state<Asset | null>(null);
@@ -9,8 +12,9 @@
   let recordingTitle = $state('');
   let startTimeMs = $state(100);
   let endTimeMs = $state(700);
-  let status = $state('Ready for a bounded local inspection.');
+  let status = $state('Ready for one bounded inspection.');
   let busy = $state(false);
+  let requiresPromotion = $derived(Boolean(preview?.candidateMetadata.canonicalObjectKey && preview.candidateMetadata.canonicalObjectKey !== preview.objectKey));
 
   async function request(path: string, body: unknown) {
     const response = await fetch(path, {
@@ -23,17 +27,25 @@
     return value;
   }
 
-  async function inspectFixture() {
+  async function inspectFirstWork() {
     busy = true;
-    status = 'Calculating SHA-256 and reading ffprobe metadata…';
+    status = 'Reading one Wasabi object, calculating SHA-256 and consulting MusicBrainz…';
     try {
-      const result = await request('/api/ingest/preview', { fixture: true });
+      const result = await request('/api/ingest/preview', {
+        sourceObjectKey: 'ref/20 late/Gavin Bryars/The Sinking of the Titanic/Sinking of the Titanic.mp3',
+        mediaKind: 'aud',
+        collectionCode: '20L',
+        entitySlug: 'bryars',
+        creatorDisplay: 'Gavin Bryars',
+        workTitle: 'The Sinking of the Titanic',
+        analyze: false
+      });
       preview = result.preview;
       workTitle = preview!.candidateMetadata.title;
       recordingTitle = preview!.candidateMetadata.recordingTitle;
       asset = null;
       segment = null;
-      status = 'Candidate ready. Nothing canonical has been written.';
+      status = 'Real candidate ready. Wasabi remains unchanged until reviewed promotion.';
     } catch (error) {
       status = error instanceof Error ? error.message : 'Inspection failed';
     } finally {
@@ -97,17 +109,28 @@
 <main>
   <section class="intro">
     <div>
-      <span class="eyebrow">Phase 0 · local fixture</span>
+      <span class="eyebrow">Phase 1 · one work at a time</span>
       <h1>Listen closely.<br />Commit deliberately.</h1>
     </div>
-    <p>Aby keeps the original file untouched, separates machine candidates from canonical metadata, and treats segments as temporal references before they become files.</p>
+    <div class="intro-context">
+      <p>Aby keeps the original file untouched, separates machine candidates from canonical metadata, and treats segments as temporal references before they become files.</p>
+      {#if data.user}
+        <div class="identity"><span>{data.user.name || data.user.email || 'Logto user'}</span><small>Shared Logto identity</small><form method="POST" action="?/signOut"><button class="secondary">Sign out</button></form></div>
+      {:else}
+        <form method="POST" action="?/signIn"><button class="primary">Continue with Logto</button></form>
+      {/if}
+    </div>
   </section>
 
   <section class="workflow" aria-label="Ingest workflow">
     <article class:complete={Boolean(preview)}>
       <header><span>01</span><h2>Inspect</h2></header>
-      <p>Calculate a checksum and extract technical metadata from one bundled PCM fixture.</p>
-      <button class="primary" onclick={inspectFixture} disabled={busy}>Inspect fixture</button>
+      <p>{data.user ? 'Inspect the selected Gavin Bryars object without scanning the rest of ref/.' : 'Authentication uses the same Logto identity as Seshat and Musiki.'}</p>
+      {#if data.user}
+        <button class="primary" onclick={inspectFirstWork} disabled={busy}>Inspect first Wasabi work</button>
+      {:else}
+        <button class="secondary" disabled>Sign in first</button>
+      {/if}
     </article>
 
     <article class:complete={Boolean(asset)}>
@@ -115,7 +138,7 @@
       {#if preview}
         <label>Work title<input bind:value={workTitle} /></label>
         <label>Recording title<input bind:value={recordingTitle} /></label>
-        <button class="primary" onclick={commitCandidate} disabled={busy || Boolean(asset)}>Commit canonical metadata</button>
+        <button class="primary" onclick={commitCandidate} disabled={busy || Boolean(asset) || requiresPromotion}>{requiresPromotion ? 'Promotion requires review' : 'Commit canonical metadata'}</button>
       {:else}
         <p>Candidate metadata will appear here. It remains editable until explicit commit.</p>
       {/if}
@@ -143,13 +166,21 @@
     {#if preview}
       <dl>
         <div><dt>Source</dt><dd>{preview.provider} · {preview.originalFilename}</dd></div>
+        <div><dt>Source key</dt><dd class="mono">{preview.objectKey}</dd></div>
+        {#if preview.candidateMetadata.canonicalObjectKey}<div><dt>Proposed key</dt><dd class="mono">{preview.candidateMetadata.canonicalObjectKey}</dd></div>{/if}
         <div><dt>SHA-256</dt><dd class="mono">{preview.checksumSha256}</dd></div>
         <div><dt>Format</dt><dd>{preview.technicalMetadata.formatName} · {preview.technicalMetadata.audioCodec ?? 'unknown codec'}</dd></div>
         <div><dt>Signal</dt><dd>{preview.technicalMetadata.sampleRate ?? '—'} Hz · {preview.technicalMetadata.channels ?? '—'} ch · {preview.technicalMetadata.durationMs} ms</dd></div>
         <div><dt>Review state</dt><dd>{asset ? 'accepted by human commit' : preview.status}</dd></div>
+        {#if preview.candidateMetadata.identificationCandidates?.[0]}
+          <!-- eslint-disable-next-line svelte/no-navigation-without-resolve -->
+          <div><dt>MusicBrainz</dt><dd><a href={preview.candidateMetadata.identificationCandidates[0].canonicalUrl} target="_blank" rel="noreferrer">{preview.candidateMetadata.identificationCandidates[0].title}</a> · {Math.round(preview.candidateMetadata.identificationCandidates[0].score * 100)}% candidate</dd></div>
+        {/if}
+        {#if preview.candidateMetadata.imageCandidates?.[0]}
+          <div><dt>Feature image</dt><dd><img class="feature-candidate" src={preview.candidateMetadata.imageCandidates[0].url} alt="Candidate feature art" /><small>{preview.candidateMetadata.imageCandidates[0].exactRelease ? 'Exact release cover' : 'Release-group fallback; requires confirmation'}</small></dd></div>
+        {/if}
         {#if segment}<div><dt>Segment</dt><dd>{segment.startTimeMs}–{segment.endTimeMs} ms · logical interval</dd></div>{/if}
       </dl>
     {/if}
   </section>
 </main>
-

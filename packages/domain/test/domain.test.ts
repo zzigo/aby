@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { JobContractSchema, SegmentCreateSchema } from '../src/index';
+import { CollectionCodeSchema, EntitySlugSchema, JobContractSchema, SegmentCreateSchema } from '../src/index';
 
 describe('segment invariants', () => {
   test('accepts a logical interval', () => {
@@ -20,3 +20,10 @@ test('analysis remains opt-in in job contracts', () => {
   expect(job.analyze).toBe(false);
 });
 
+test('catalog codes and entity slugs follow the Luciano-readable convention', () => {
+  for (const code of ['20E', '20L', '20LAT', '20ELE', '21E', 'pop', 'tec', 'ens']) {
+    expect(CollectionCodeSchema.parse(code)).toBe(code);
+  }
+  expect(EntitySlugSchema.parse('pinkfloyd')).toBe('pinkfloyd');
+  expect(() => EntitySlugSchema.parse('Pink Floyd')).toThrow();
+});
