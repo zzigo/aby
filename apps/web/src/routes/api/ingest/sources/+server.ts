@@ -29,40 +29,50 @@ export const GET: RequestHandler = () => api('ingest.sources', async () => {
     
     let collectionCode = isAudio ? '20L' : '20ELE';
     let creatorDisplay = 'Unknown Artist';
-    let entitySlug = 'unknown';
     let workTitle = 'Untitled Work';
     let recordingTitle = 'Unspecified Session';
 
-    if (parts.length >= 4) {
-      const colPart = parts[1].toLowerCase();
-      if (colPart.includes('late') || colPart === '20l') collectionCode = '20L';
-      else if (colPart.includes('early') || colPart === '20e') collectionCode = '20E';
-      else if (colPart.includes('lat') || colPart.includes('latin')) collectionCode = '20LAT';
-      else if (colPart.includes('ele') || colPart.includes('electro')) collectionCode = '20ELE';
-      else if (colPart.includes('pop')) collectionCode = 'pop';
-      else if (colPart.includes('tec') || colPart.includes('techno')) collectionCode = 'tec';
-      else if (colPart.includes('ens') || colPart.includes('ensemble')) collectionCode = 'ens';
-
-      creatorDisplay = parts[2];
-      entitySlug = creatorDisplay.normalize('NFKD')
-        .replace(/[\u0300-\u036f]/g, '')
-        .toLowerCase()
-        .replace(/[^a-z0-9]+/g, '');
-
-      workTitle = parts[3];
-      if (parts.length >= 5) {
-        recordingTitle = parts[4].replace(/\.[^/.]+$/, "");
-      }
-    } else if (parts.length === 3) {
-      creatorDisplay = parts[1];
-      entitySlug = creatorDisplay.normalize('NFKD')
-        .replace(/[\u0300-\u036f]/g, '')
-        .toLowerCase()
-        .replace(/[^a-z0-9]+/g, '');
-      workTitle = parts[2].replace(/\.[^/.]+$/, "");
-    } else {
-      workTitle = parts[parts.length - 1].replace(/\.[^/.]+$/, "");
+    // Collection detection from anywhere in parts
+    for (const part of parts) {
+      const n = part.toLowerCase();
+      if (n.includes('late') || n === '20l') collectionCode = '20L';
+      else if (n.includes('early') || n === '20e') collectionCode = '20E';
+      else if (n.includes('lat') || n.includes('latin')) collectionCode = '20LAT';
+      else if (n.includes('ele') || n.includes('electro')) collectionCode = '20ELE';
+      else if (n.includes('pop')) collectionCode = 'pop';
+      else if (n.includes('tec') || n.includes('techno')) collectionCode = 'tec';
+      else if (n.includes('ens') || n.includes('ensemble')) collectionCode = 'ens';
     }
+
+    const filename = parts[parts.length - 1];
+    const filenameWithoutExt = filename.replace(/\.[^/.]+$/, "");
+    const parentFolder = parts.length >= 2 ? parts[parts.length - 2] : '';
+    const grandparentFolder = parts.length >= 3 ? parts[parts.length - 3] : '';
+
+    const isCollection = (name: string): boolean => {
+      const n = name.toLowerCase();
+      return n.includes('late') || n.includes('early') || n.includes('lat') || n.includes('ele') || n.includes('pop') || n.includes('tec') || n.includes('ens') || n === '20l' || n === '20e';
+    };
+
+    if (parentFolder && parentFolder !== 'ref' && parentFolder !== 'mov' && !isCollection(parentFolder)) {
+      if (grandparentFolder && grandparentFolder !== 'ref' && grandparentFolder !== 'mov' && !isCollection(grandparentFolder)) {
+        creatorDisplay = grandparentFolder;
+        workTitle = parentFolder;
+        recordingTitle = filenameWithoutExt;
+      } else {
+        creatorDisplay = parentFolder;
+        workTitle = filenameWithoutExt;
+        recordingTitle = filenameWithoutExt;
+      }
+    } else {
+      workTitle = filenameWithoutExt;
+      recordingTitle = filenameWithoutExt;
+    }
+
+    const entitySlug = creatorDisplay.normalize('NFKD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '');
 
     return {
       objectKey: key,

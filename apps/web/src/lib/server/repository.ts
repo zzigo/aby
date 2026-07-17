@@ -28,7 +28,16 @@ export interface AbyRepository {
   savePreview(preview: IngestPreview): Promise<IngestPreview>;
   getPreview(ownerId: string, previewId: string): Promise<IngestPreview | null>;
   markPreviewPromoted(ownerId: string, previewId: string, sourceObjectKey: string, targetObjectKey: string, updatedCandidateMetadata?: any): Promise<IngestPreview>;
-  commitPreview(ownerId: string, previewId: string, workTitle: string, recordingTitle: string): Promise<Asset>;
+  commitPreview(
+    ownerId: string,
+    previewId: string,
+    workTitle: string,
+    recordingTitle: string,
+    creator?: string,
+    releaseDate?: string,
+    label?: string,
+    catalogNumber?: string
+  ): Promise<Asset>;
   listCatalog(ownerId: string): Promise<CatalogItem[]>;
   getAsset(ownerId: string, assetId: string): Promise<Asset | null>;
   getSpectrogramAnalysis(ownerId: string, assetId: string): Promise<SpectrogramAnalysis | null>;
@@ -82,7 +91,16 @@ export class MemoryAbyRepository implements AbyRepository {
     return structuredClone(promoted);
   }
 
-  async commitPreview(ownerId: string, previewId: string, workTitle: string, recordingTitle: string): Promise<Asset> {
+  async commitPreview(
+    ownerId: string,
+    previewId: string,
+    workTitle: string,
+    recordingTitle: string,
+    creator?: string,
+    releaseDate?: string,
+    label?: string,
+    catalogNumber?: string
+  ): Promise<Asset> {
     const preview = this.#previews.get(previewId);
     if (!preview || preview.ownerId !== ownerId) throw new AbyError('preview_not_found', 'Ingest preview not found', 404);
     if (preview.status === 'rejected') throw new AbyError('preview_not_committable', 'Rejected previews cannot be committed', 409);
@@ -119,6 +137,11 @@ export class MemoryAbyRepository implements AbyRepository {
       recordingTitle: recordingTitle
     }];
 
+    const finalCreator = creator !== undefined ? creator : preview.candidateMetadata.creator;
+    const finalReleaseDate = releaseDate !== undefined ? releaseDate : preview.candidateMetadata.releaseDate;
+    const finalLabel = label !== undefined ? label : preview.candidateMetadata.label;
+    const finalCatalogNumber = catalogNumber !== undefined ? catalogNumber : preview.candidateMetadata.catalogNumber;
+
     let mainAsset: Asset | undefined;
 
     for (const track of tracks) {
@@ -134,7 +157,16 @@ export class MemoryAbyRepository implements AbyRepository {
         ...(preview.bucket ? { bucket: preview.bucket } : {}), objectKey: track.objectKey,
         originalFilename: track.originalFilename, checksumSha256: track.checksumSha256,
         technicalMetadata: track.technicalMetadata,
-        canonicalMetadata: { ...preview.candidateMetadata, title: workTitle, recordingTitle: track.recordingTitle, tracks: undefined },
+        canonicalMetadata: { 
+          ...preview.candidateMetadata, 
+          title: workTitle, 
+          recordingTitle: track.recordingTitle, 
+          creator: finalCreator,
+          releaseDate: finalReleaseDate,
+          label: finalLabel,
+          catalogNumber: finalCatalogNumber,
+          tracks: undefined 
+        },
         provenance, createdAt: now
       };
       this.#assets.set(asset.id, asset);
@@ -316,7 +348,16 @@ export class PostgresAbyRepository implements AbyRepository {
     }
   }
 
-  async commitPreview(ownerId: string, previewId: string, workTitle: string, recordingTitle: string): Promise<Asset> {
+  async commitPreview(
+    ownerId: string,
+    previewId: string,
+    workTitle: string,
+    recordingTitle: string,
+    creator?: string,
+    releaseDate?: string,
+    label?: string,
+    catalogNumber?: string
+  ): Promise<Asset> {
     const client = await this.#pool.connect();
     try {
       await client.query('BEGIN');
@@ -351,6 +392,11 @@ export class PostgresAbyRepository implements AbyRepository {
         technicalMetadata: preview.technical_metadata,
         recordingTitle: recordingTitle
       }];
+
+      const finalCreator = creator !== undefined ? creator : preview.candidate_metadata.creator;
+      const finalReleaseDate = releaseDate !== undefined ? releaseDate : preview.candidate_metadata.releaseDate;
+      const finalLabel = label !== undefined ? label : preview.candidate_metadata.label;
+      const finalCatalogNumber = catalogNumber !== undefined ? catalogNumber : preview.candidate_metadata.catalogNumber;
 
       // Lock all locations and checksums
       const lockKeys = [];
@@ -412,13 +458,17 @@ export class PostgresAbyRepository implements AbyRepository {
           ...preview.candidate_metadata, 
           title: workTitle, 
           recordingTitle: track.recordingTitle,
+          creator: finalCreator,
+          releaseDate: finalReleaseDate,
+          label: finalLabel,
+          catalogNumber: finalCatalogNumber,
           tracks: undefined 
         };
         const recordingMetadata = {
           recordingFolder: preview.candidate_metadata.recordingFolder,
-          releaseDate: preview.candidate_metadata.releaseDate,
-          label: preview.candidate_metadata.label,
-          catalogNumber: preview.candidate_metadata.catalogNumber,
+          releaseDate: finalReleaseDate,
+          label: finalLabel,
+          catalogNumber: finalCatalogNumber,
           identificationCandidates: preview.candidate_metadata.identificationCandidates
         };
 

@@ -12,6 +12,10 @@
   let segment = $state<Segment | null>(null);
   let workTitle = $state('');
   let recordingTitle = $state('');
+  let creator = $state('');
+  let releaseDate = $state('');
+  let label = $state('');
+  let catalogNumber = $state('');
   let startTimeMs = $state(100);
   let endTimeMs = $state(700);
   let status = $state('Ready for one bounded inspection.');
@@ -75,6 +79,10 @@
       preview = result.preview;
       workTitle = preview!.candidateMetadata.title;
       recordingTitle = preview!.candidateMetadata.recordingTitle;
+      creator = preview!.candidateMetadata.creator || '';
+      releaseDate = preview!.candidateMetadata.releaseDate || '';
+      label = preview!.candidateMetadata.label || '';
+      catalogNumber = preview!.candidateMetadata.catalogNumber || '';
       asset = null;
       segment = null;
       status = `Inspected: ${preview!.objectKey}. Real candidate ready.`;
@@ -144,6 +152,10 @@
       preview = result.preview;
       workTitle = preview!.candidateMetadata.title;
       recordingTitle = preview!.candidateMetadata.recordingTitle;
+      creator = preview!.candidateMetadata.creator || '';
+      releaseDate = preview!.candidateMetadata.releaseDate || '';
+      label = preview!.candidateMetadata.label || '';
+      catalogNumber = preview!.candidateMetadata.catalogNumber || '';
       asset = null;
       segment = null;
       status = `Inspected: ${preview!.objectKey}. Real candidate ready.`;
@@ -161,7 +173,11 @@
       const result = await request('/api/ingest/commit', {
         previewId: preview.id,
         workTitle,
-        recordingTitle
+        recordingTitle,
+        creator,
+        releaseDate,
+        label,
+        catalogNumber
       });
       asset = result.asset;
       status = 'Work, recording and asset committed explicitly.';
@@ -304,8 +320,14 @@
     <article class:complete={Boolean(asset)}>
       <header><span>02</span><h2>Confirm</h2></header>
       {#if preview}
-        <label>Work title<input bind:value={workTitle} /></label>
-        <label>Recording title<input bind:value={recordingTitle} /></label>
+        <label>Work/Album title<input bind:value={workTitle} /></label>
+        <label>Recording/Track title<input bind:value={recordingTitle} /></label>
+        <label>Artist/s<input bind:value={creator} /></label>
+        <div style="display: flex; gap: 12px; margin-bottom: 12px;">
+          <label style="flex: 1; margin: 0;">Year<input bind:value={releaseDate} style="width: 100%; box-sizing: border-box;" /></label>
+          <label style="flex: 1; margin: 0;">Label<input bind:value={label} style="width: 100%; box-sizing: border-box;" /></label>
+          <label style="flex: 1; margin: 0;">Catalog No.<input bind:value={catalogNumber} style="width: 100%; box-sizing: border-box;" /></label>
+        </div>
         {#if preview.candidateMetadata.tracks && preview.candidateMetadata.tracks.length > 1}
           <div style="margin-top: 14px; margin-bottom: 14px; border: 1px solid var(--line); padding: 12px; background: #131412;">
             <header style="font-size: 11px; font-weight: 600; text-transform: uppercase; color: var(--signal); margin-bottom: 6px; letter-spacing: 0.05em;">

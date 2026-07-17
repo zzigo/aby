@@ -8,7 +8,7 @@ import { inspectLocalAsset } from '@zztt/aby-media-ingest';
 import { AbyError } from './errors';
 import { readConfig } from './config';
 import { recordingFolderName } from './catalog-path';
-import { identifyWithMusicBrainz } from './musicbrainz';
+import { identifyWithMusicBrainz, getAudioFingerprint, lookupAcoustID, identifyWithMusicBrainzRecordingId } from './musicbrainz';
 import { fetchWikidataEntity } from './wikidata';
 import type { AbyRepository } from './repository';
 import { assertSourceObjectKey, downloadWasabiSourceObject, headWasabiSourceObject, normalizeObjectKey, listWasabiSiblingKeys } from './storage';
@@ -79,10 +79,39 @@ export async function inspectWasabiSource(
     await downloadWasabiSourceObject(sourceObjectKey, mainLocalPath);
     const mainInspected = await inspectLocalAsset(mainLocalPath, { binary: config.FFPROBE_PATH, timeoutMs: config.FFPROBE_TIMEOUT_MS });
     
-    const identification = input.mediaKind === 'aud'
-      ? await identifyWithMusicBrainz({ creator: input.creatorDisplay, workTitle: input.workTitle, durationMs: mainInspected.metadata.durationMs })
-      : null;
-    const wikidata = input.creatorDisplay ? await fetchWikidataEntity(input.creatorDisplay) : null;
+    let identification = null;
+    if (input.mediaKind === 'aud') {
+      console.log(`[AcoustID] Extracting fingerprint for ${sourceObjectKey}...`);
+      const fp = await getAudioFingerprint(mainLocalPath, config.FPCALC_PATH);
+      if (fp) {
+        console.log(`[AcoustID] Looking up fingerprint...`);
+        const acoustidRes = await lookupAcoustID(fp.duration, fp.fingerprint, config.ACOUSTID_CLIENT_API_KEY);
+        const recordingId = acoustidRes?.results?.[0]?.recordings?.[0]?.id;
+        if (recordingId) {
+          console.log(`[AcoustID] Matched MusicBrainz Recording ID: ${recordingId}`);
+          identification = await identifyWithMusicBrainzRecordingId(recordingId, mainInspected.metadata.durationMs);
+        }
+      }
+      if (!identification) {
+        console.log(`[AcoustID] No match. Falling back to metadata text search.`);
+        identification = await identifyWithMusicBrainz({
+          creator: input.creatorDisplay,
+          workTitle: input.workTitle,
+          durationMs: mainInspected.metadata.durationMs
+        });
+      }
+    }
+
+    const creator = identification?.artistName || input.creatorDisplay;
+    const workTitle = identification?.releaseTitle || input.workTitle;
+    const entitySlug = identification?.artistName
+      ? identification.artistName.normalize('NFKD')
+          .replace(/[\u0300-\u036f]/g, '')
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, '')
+      : input.entitySlug;
+
+    const wikidata = creator ? await fetchWikidataEntity(creator) : null;
     const recordingTitle = input.recordingTitle || identification?.recordingTitle || input.workTitle;
     const recordingFolder = recordingFolderName({
       ...(identification?.releaseDate ? { releaseDate: identification.releaseDate } : {}),
@@ -94,10 +123,10 @@ export async function inspectWasabiSource(
     const targetObjectKey = normalizeObjectKey([
       canonicalPrefix.replace(/\/$/, ''),
       input.collectionCode,
-      input.entitySlug,
-      pathSegment(input.workTitle),
+      entitySlug,
+      pathSegment(workTitle),
       pathSegment(recordingFolder),
-      assetFilename(input.workTitle, basename(sourceObjectKey), siblingKeys.length > 1)
+      assetFilename(workTitle, basename(sourceObjectKey), siblingKeys.length > 1)
     ].join('/'));
     
     const identificationCandidates = identification ? [{
@@ -172,10 +201,10 @@ export async function inspectWasabiSource(
         const siblingTargetObjectKey = normalizeObjectKey([
           canonicalPrefix.replace(/\/$/, ''),
           input.collectionCode,
-          input.entitySlug,
-          pathSegment(input.workTitle),
+          entitySlug,
+          pathSegment(workTitle),
           pathSegment(recordingFolder),
-          assetFilename(input.workTitle, basename(siblingKey), siblingKeys.length > 1)
+          assetFilename(workTitle, basename(siblingKey), siblingKeys.length > 1)
         ].join('/'));
 
         tracks.push({
@@ -200,14 +229,14 @@ export async function inspectWasabiSource(
       checksumSha256: mainInspected.checksumSha256,
       technicalMetadata: { ...mainInspected.metadata, sizeBytes: mainHead.sizeBytes },
       candidateMetadata: {
-        title: input.workTitle,
+        title: workTitle,
         recordingTitle,
         recordingFolder,
-        creator: input.creatorDisplay,
+        creator,
         ...(identification?.releaseDate ? { releaseDate: identification.releaseDate } : {}),
         ...(identification?.label ? { label: identification.label } : {}),
         ...(identification?.catalogNumber ? { catalogNumber: identification.catalogNumber } : {}),
-        entitySlug: input.entitySlug,
+        entitySlug,
         collectionCode: input.collectionCode,
         canonicalObjectKey: targetObjectKey,
         identificationCandidates,

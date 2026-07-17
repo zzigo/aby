@@ -174,3 +174,137 @@ export async function identifyWithMusicBrainz(
     } : {})
   };
 }
+
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+const execFileAsync = promisify(execFile);
+
+export async function getAudioFingerprint(path: string, fpcalcPath: string): Promise<{ duration: number; fingerprint: string } | null> {
+  try {
+    const { stdout } = await execFileAsync(fpcalcPath, ['-json', '-length', '120', path], { timeout: 30_000 });
+    const parsed = JSON.parse(stdout);
+    if (parsed.fingerprint && parsed.duration) {
+      return {
+        duration: Math.round(parsed.duration),
+        fingerprint: parsed.fingerprint
+      };
+    }
+  } catch (err) {
+    console.error('AcoustID fpcalc fingerprinting failed:', err);
+  }
+  return null;
+}
+
+export async function lookupAcoustID(duration: number, fingerprint: string, clientKey: string): Promise<any> {
+  const url = new URL('https://api.acoustid.org/v2/lookup');
+  url.searchParams.append('client', clientKey);
+  url.searchParams.append('meta', 'recordings+releases+releasegroups+tracks');
+  url.searchParams.append('duration', String(duration));
+  url.searchParams.append('fingerprint', fingerprint);
+
+  try {
+    const res = await fetch(url.toString(), {
+      headers: { 'User-Agent': 'Aby/0.1.0 (https://aby.zztt.org)' }
+    });
+    if (!res.ok) {
+      console.warn('AcoustID API lookup failed with status:', res.status);
+      return null;
+    }
+    return await res.json();
+  } catch (err) {
+    console.error('AcoustID lookup HTTP request failed:', err);
+    return null;
+  }
+}
+
+export async function identifyWithMusicBrainzRecordingId(
+  recordingId: string,
+  durationMs: number,
+  options: IdentifyOptions = {}
+): Promise<MusicBrainzIdentification | null> {
+  const config = readConfig();
+  const fetcher = options.fetcher ?? fetch;
+  const userAgent = `Aby/0.1.0 (${config.ABY_EXTERNAL_METADATA_CONTACT})`;
+  
+  const recordingUrl = new URL(`${config.MUSICBRAINZ_BASE_URL.replace(/\/+$/, '')}/recording/${recordingId}`);
+  recordingUrl.searchParams.set('fmt', 'json');
+  recordingUrl.searchParams.set('inc', 'artist-credits+releases');
+  
+  let recording: MusicBrainzRecording;
+  try {
+    recording = await jsonRequest<MusicBrainzRecording>(fetcher, recordingUrl, userAgent);
+  } catch (err) {
+    console.error(`MusicBrainz lookup for recording ${recordingId} failed:`, err);
+    return null;
+  }
+  
+  const releaseSummary = recording.releases?.[0];
+  let release: MusicBrainzRelease | undefined;
+  if (releaseSummary) {
+    await sleep(options.musicBrainzIntervalMs ?? 1_100);
+    const releaseUrl = new URL(`${config.MUSICBRAINZ_BASE_URL.replace(/\/+$/, '')}/release/${releaseSummary.id}`);
+    releaseUrl.searchParams.set('fmt', 'json');
+    releaseUrl.searchParams.set('inc', 'artist-credits+labels+release-groups');
+    try {
+      release = await jsonRequest<MusicBrainzRelease>(fetcher, releaseUrl, userAgent);
+    } catch (err) {
+      console.error(`MusicBrainz lookup for release ${releaseSummary.id} failed:`, err);
+    }
+  }
+  const labelInfo = release?.['label-info']?.[0];
+  const releaseGroupId = release?.['release-group']?.id;
+  let coverDocument: CoverArtDocument | null = null;
+  let exactRelease = true;
+  if (release?.id) {
+    try {
+      coverDocument = await optionalCoverArt(
+        fetcher,
+        new URL(`${config.COVER_ART_ARCHIVE_BASE_URL.replace(/\/+$/, '')}/release/${release.id}/`),
+        userAgent
+      );
+    } catch (err) {
+      console.warn(`Cover Art lookup for release ${release.id} failed:`, err);
+    }
+  }
+  if (!coverDocument && releaseGroupId) {
+    exactRelease = false;
+    try {
+      coverDocument = await optionalCoverArt(
+        fetcher,
+        new URL(`${config.COVER_ART_ARCHIVE_BASE_URL.replace(/\/+$/, '')}/release-group/${releaseGroupId}/`),
+        userAgent
+      );
+    } catch (err) {
+      console.warn(`Cover Art lookup for release-group ${releaseGroupId} failed:`, err);
+    }
+  }
+  const image = coverDocument?.images?.find((candidate) => candidate.front && candidate.approved !== false)
+    ?? coverDocument?.images?.find((candidate) => candidate.approved !== false);
+  const imageUrl = image?.thumbnails?.['500'] ?? image?.thumbnails?.large ?? image?.image;
+  const artist = recording['artist-credit']?.[0];
+  const score = 0.99;
+  return {
+    recordingId: recording.id,
+    recordingTitle: recording.title,
+    ...(recording.length !== undefined ? { recordingLengthMs: recording.length } : {}),
+    ...(artist?.artist?.id ? { artistId: artist.artist.id } : {}),
+    artistName: artist?.name || artist?.artist?.name || 'Unknown Artist',
+    ...(release?.id ? { releaseId: release.id } : {}),
+    ...(release?.title ? { releaseTitle: release.title } : {}),
+    ...(release?.date ? { releaseDate: release.date } : {}),
+    ...(release?.country ? { releaseCountry: release.country } : {}),
+    ...(releaseGroupId ? { releaseGroupId } : {}),
+    ...(labelInfo?.label?.name ? { label: labelInfo.label.name } : {}),
+    ...(labelInfo?.label?.id ? { labelId: labelInfo.label.id } : {}),
+    ...(labelInfo?.['catalog-number'] ? { catalogNumber: labelInfo['catalog-number'] } : {}),
+    score,
+    ...(image && imageUrl ? {
+      cover: {
+        url: imageUrl.replace(/^http:/, 'https:'),
+        exactRelease,
+        sourceId: image.id,
+        ...(coverDocument?.release ? { sourceRelease: coverDocument.release } : {})
+      }
+    } : {})
+  };
+}

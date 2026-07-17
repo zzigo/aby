@@ -33,3 +33,29 @@ test('selects the duration-matched recording and marks release-group art as fall
   expect(result?.cover?.url).toBe('https://coverartarchive.org/cover-500.jpg');
   expect(requests).toHaveLength(4);
 });
+
+import { identifyWithMusicBrainzRecordingId } from '../src/lib/server/musicbrainz';
+
+test('identifies recording directly by ID', async () => {
+  const requests: string[] = [];
+  const fetcher = (async (input: string | URL | Request) => {
+    const url = String(input);
+    requests.push(url);
+    if (url.includes('/recording/rec-id')) return Response.json({
+      id: 'rec-id', title: 'Direct Recording Track', length: 120_000,
+      'artist-credit': [{ name: 'Solesmes Monk', artist: { id: 'artist-id', name: 'Solesmes Monk' } }],
+      releases: [{ id: 'release-id', title: 'Gregorian Easter', date: '2004', country: 'FR' }]
+    });
+    if (url.includes('musicbrainz.org') && url.includes('/release/release-id')) return Response.json({
+      id: 'release-id', title: 'Gregorian Easter', date: '2004', country: 'FR',
+      'release-group': { id: 'group-id', title: 'Gregorian Easter' },
+      'label-info': [{ 'catalog-number': 'L-4380', label: { id: 'label-id', name: 'Solesmes Records' } }]
+    });
+    return new Response('', { status: 404 });
+  }) as typeof fetch;
+  const result = await identifyWithMusicBrainzRecordingId('rec-id', 120_000, { fetcher, musicBrainzIntervalMs: 0 });
+  expect(result?.recordingId).toBe('rec-id');
+  expect(result?.artistName).toBe('Solesmes Monk');
+  expect(result?.releaseTitle).toBe('Gregorian Easter');
+  expect(result?.catalogNumber).toBe('L-4380');
+});

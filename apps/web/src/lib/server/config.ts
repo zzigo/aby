@@ -24,13 +24,15 @@ const EnvironmentSchema = z.object({
   FFPROBE_TIMEOUT_MS: z.coerce.number().int().min(1_000).max(120_000).default(30_000),
   FFMPEG_PATH: z.string().trim().default('ffmpeg'),
   FFMPEG_ANALYSIS_TIMEOUT_MS: z.coerce.number().int().min(10_000).max(1_800_000).default(900_000),
+  FPCALC_PATH: z.string().trim().default('fpcalc'),
   LOGTO_ISSUER_URL: optionalText,
   LOGTO_CLIENT_ID: optionalText,
   LOGTO_CLIENT_SECRET: optionalText,
   QDRANT_URL: optionalText,
   MUSICBRAINZ_BASE_URL: z.string().url().default('https://musicbrainz.org/ws/2'),
   COVER_ART_ARCHIVE_BASE_URL: z.string().url().default('https://coverartarchive.org'),
-  ABY_EXTERNAL_METADATA_CONTACT: z.string().trim().default('https://aby.zztt.org')
+  ABY_EXTERNAL_METADATA_CONTACT: z.string().trim().default('https://aby.zztt.org'),
+  ACOUSTID_CLIENT_API_KEY: z.string().trim().default('8Xt5HI6Y')
 });
 
 export type AbyConfig = ReturnType<typeof readConfig>;
