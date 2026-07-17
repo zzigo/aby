@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import pg from 'pg';
-import type { Asset, CatalogItem, ConversionSettings, IngestPreview, Provenance, Segment, SegmentCreate, TrackEdit } from '@zztt/aby-domain';
+import type { AlbumEdit, Asset, CatalogItem, ConversionSettings, IngestPreview, Provenance, Segment, SegmentCreate, TrackEdit } from '@zztt/aby-domain';
 import { AbyError } from './errors';
 import { readConfig } from './config';
 
@@ -44,6 +44,8 @@ export interface AbyRepository {
   listCatalog(ownerId: string): Promise<CatalogItem[]>;
   getCatalogItem(ownerId: string, assetId: string): Promise<CatalogItem | null>;
   updateCatalogItem(ownerId: string, assetId: string, input: TrackEdit): Promise<CatalogItem>;
+  updateAlbum(ownerId: string, albumId: string, input: AlbumEdit): Promise<CatalogItem[]>;
+  mergeAlbumMetadata(ownerId: string, albumId: string, metadata: Record<string, unknown>): Promise<CatalogItem[]>;
   softDeleteAsset(ownerId: string, assetId: string): Promise<void>;
   getConversionSettings(ownerId: string): Promise<ConversionSettings>;
   saveConversionSettings(ownerId: string, settings: ConversionSettings): Promise<ConversionSettings>;
@@ -269,6 +271,29 @@ export class MemoryAbyRepository implements AbyRepository {
       ...(input.catalogNumber ? { catalogNumber: input.catalogNumber } : { catalogNumber: undefined })
     };
     return (await this.getCatalogItem(ownerId, assetId))!;
+  }
+
+  async updateAlbum(ownerId: string, albumId: string, input: AlbumEdit): Promise<CatalogItem[]> {
+    const assets = [...this.#assets.values()].filter((asset) => asset.ownerId === ownerId && asset.albumId === albumId);
+    if (!assets.length) throw new AbyError('album_not_found', 'Album not found', 404);
+    for (const asset of assets) {
+      asset.canonicalMetadata = {
+        ...asset.canonicalMetadata,
+        albumTitle: input.title,
+        ...(input.creator ? { creator: input.creator } : { creator: undefined }),
+        ...(input.releaseDate ? { releaseDate: input.releaseDate } : { releaseDate: undefined }),
+        ...(input.label ? { label: input.label } : { label: undefined }),
+        ...(input.catalogNumber ? { catalogNumber: input.catalogNumber } : { catalogNumber: undefined })
+      };
+    }
+    return (await this.listCatalog(ownerId)).filter((item) => item.albumId === albumId);
+  }
+
+  async mergeAlbumMetadata(ownerId: string, albumId: string, metadata: Record<string, unknown>): Promise<CatalogItem[]> {
+    const assets = [...this.#assets.values()].filter((asset) => asset.ownerId === ownerId && asset.albumId === albumId);
+    if (!assets.length) throw new AbyError('album_not_found', 'Album not found', 404);
+    for (const asset of assets) asset.canonicalMetadata = { ...asset.canonicalMetadata, ...metadata };
+    return (await this.listCatalog(ownerId)).filter((item) => item.albumId === albumId);
   }
 
   async softDeleteAsset(ownerId: string, assetId: string): Promise<void> {
@@ -812,6 +837,70 @@ export class PostgresAbyRepository implements AbyRepository {
       client.release();
     }
     return (await this.getCatalogItem(ownerId, assetId))!;
+  }
+
+  async updateAlbum(ownerId: string, albumId: string, input: AlbumEdit): Promise<CatalogItem[]> {
+    const client = await this.#pool.connect();
+    try {
+      await client.query('BEGIN');
+      const album = await client.query(
+        'SELECT id FROM aby.albums WHERE id=$1 AND owner_id=$2 FOR UPDATE', [albumId, ownerId]
+      );
+      if (!album.rows[0]) throw new AbyError('album_not_found', 'Album not found', 404);
+      const albumMetadata = {
+        creator: input.creator ?? null,
+        releaseDate: input.releaseDate ?? null,
+        label: input.label ?? null,
+        catalogNumber: input.catalogNumber ?? null
+      };
+      const canonicalMetadata = { albumTitle: input.title, ...albumMetadata };
+      await client.query(
+        'UPDATE aby.albums SET title=$1,metadata=jsonb_strip_nulls(metadata || $2::jsonb),updated_at=now() WHERE id=$3 AND owner_id=$4',
+        [input.title, albumMetadata, albumId, ownerId]
+      );
+      await client.query(
+        `UPDATE aby.recordings SET metadata=jsonb_strip_nulls(metadata || $1::jsonb),updated_at=now()
+         WHERE album_id=$2 AND owner_id=$3`,
+        [albumMetadata, albumId, ownerId]
+      );
+      await client.query(
+        `UPDATE aby.assets a SET canonical_metadata=jsonb_strip_nulls(a.canonical_metadata || $1::jsonb),updated_at=now()
+         FROM aby.recordings r WHERE a.recording_id=r.id AND r.album_id=$2 AND a.owner_id=$3`,
+        [canonicalMetadata, albumId, ownerId]
+      );
+      await client.query('COMMIT');
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+    return (await this.listCatalog(ownerId)).filter((item) => item.albumId === albumId);
+  }
+
+  async mergeAlbumMetadata(ownerId: string, albumId: string, metadata: Record<string, unknown>): Promise<CatalogItem[]> {
+    const client = await this.#pool.connect();
+    try {
+      await client.query('BEGIN');
+      const album = await client.query(
+        `UPDATE aby.albums SET metadata=metadata || $1::jsonb,updated_at=now()
+         WHERE id=$2 AND owner_id=$3 RETURNING id`,
+        [metadata, albumId, ownerId]
+      );
+      if (!album.rows[0]) throw new AbyError('album_not_found', 'Album not found', 404);
+      await client.query(
+        `UPDATE aby.assets a SET canonical_metadata=a.canonical_metadata || $1::jsonb,updated_at=now()
+         FROM aby.recordings r WHERE a.recording_id=r.id AND r.album_id=$2 AND a.owner_id=$3`,
+        [metadata, albumId, ownerId]
+      );
+      await client.query('COMMIT');
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+    return (await this.listCatalog(ownerId)).filter((item) => item.albumId === albumId);
   }
 
   async softDeleteAsset(ownerId: string, assetId: string): Promise<void> {

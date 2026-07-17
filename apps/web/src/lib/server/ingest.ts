@@ -8,7 +8,7 @@ import { inspectLocalAsset } from '@zztt/aby-media-ingest';
 import { AbyError } from './errors';
 import { readConfig } from './config';
 import { recordingFolderName } from './catalog-path';
-import { identifyWithMusicBrainz, getAudioFingerprint, lookupAcoustID, identifyWithMusicBrainzRecordingId } from './musicbrainz';
+import { findAlbumArtwork, identifyWithMusicBrainz, getAudioFingerprint, lookupAcoustID, identifyWithMusicBrainzRecordingId } from './musicbrainz';
 import { fetchWikidataEntity } from './wikidata';
 import type { AbyRepository } from './repository';
 import { assertSourceObjectKey, downloadWasabiSourceObject, headWasabiSourceObject, normalizeObjectKey, listWasabiSiblingKeys } from './storage';
@@ -118,6 +118,13 @@ export async function inspectWasabiSource(
     const wikidata = creator ? await fetchWikidataEntity(creator) : null;
     const recordingTitle = identification?.recordingTitle || input.recordingTitle || input.workTitle;
     const albumTitle = identification?.releaseTitle || (siblingKeys.length > 1 ? basename(dirname(sourceObjectKey)) : undefined);
+    const alternativeCover = !identification?.cover && creator && albumTitle
+      ? await findAlbumArtwork({ creator, albumTitle }).catch((error: unknown) => {
+          console.warn('[CoverArt] Release-group fallback unavailable:', error instanceof Error ? error.message : 'unknown error');
+          return null;
+        })
+      : null;
+    const cover = identification?.cover ?? alternativeCover;
     const recordingFolder = recordingFolderName({
       ...(identification?.releaseDate ? { releaseDate: identification.releaseDate } : {}),
       ...(identification?.label ? { label: identification.label } : {}),
@@ -157,16 +164,16 @@ export async function inspectWasabiSource(
       }
     }] : [];
     
-    const imageCandidates = identification?.cover ? [{
+    const imageCandidates = cover ? [{
       authority: 'cover-art-archive',
-      url: identification.cover.url,
+      url: cover.url,
       kind: 'feature' as const,
-      exactRelease: identification.cover.exactRelease,
-      sourceId: identification.cover.sourceId,
+      exactRelease: cover.exactRelease,
+      sourceId: cover.sourceId,
       provenance: {
-        musicBrainzReleaseId: identification.releaseId,
-        sourceRelease: identification.cover.sourceRelease,
-        fallback: identification.cover.exactRelease ? 'exact-release' : 'release-group'
+        musicBrainzReleaseId: identification?.releaseId,
+        sourceRelease: cover.sourceRelease,
+        fallback: cover.exactRelease ? 'exact-release' : 'release-group-search'
       }
     }] : [];
 

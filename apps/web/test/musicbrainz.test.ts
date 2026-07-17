@@ -1,5 +1,28 @@
 import { expect, test } from 'bun:test';
-import { identifyWithMusicBrainz } from '../src/lib/server/musicbrainz';
+import { albumArtworkLookupTitle, findAlbumArtwork, identifyWithMusicBrainz } from '../src/lib/server/musicbrainz';
+
+test('normalizes an artist-prefixed source folder for artwork lookup', () => {
+  expect(albumArtworkLookupTitle('Axel Dörner', 'axel dorner - sind (2007)')).toBe('sind');
+});
+
+test('finds release-group artwork from the normalized album title', async () => {
+  const requests: string[] = [];
+  const fetcher = (async (input: string | URL | Request) => {
+    const url = String(input);
+    requests.push(url);
+    if (url.includes('/release-group/?')) return Response.json({ 'release-groups': [{
+      id: 'sind-group', title: 'Sind', score: 100,
+      'artist-credit': [{ name: 'Axel Dörner', artist: { name: 'Axel Dörner' } }]
+    }] });
+    if (url.includes('/release-group/sind-group/')) return Response.json({
+      images: [{ id: 'sind-cover', front: true, approved: true, thumbnails: { '500': 'http://coverartarchive.org/sind.jpg' } }]
+    });
+    return new Response('', { status: 404 });
+  }) as typeof fetch;
+  const result = await findAlbumArtwork({ creator: 'Axel Dörner', albumTitle: 'axel dorner - sind (2007)' }, { fetcher });
+  expect(result?.url).toBe('https://coverartarchive.org/sind.jpg');
+  expect(decodeURIComponent(requests[0] ?? '')).toContain('releasegroup:"sind"');
+});
 
 test('selects the duration-matched recording and marks release-group art as fallback', async () => {
   const requests: string[] = [];

@@ -75,6 +75,50 @@ describe('preview-before-write repository flow', () => {
     expect(catalog.map((item) => item.recordingTitle)).toEqual(['First edited', 'Second edited']);
   });
 
+  test('updates album metadata and cover across every track', async () => {
+    const repository = new MemoryAbyRepository();
+    const collective = fixturePreview();
+    collective.candidateMetadata.tracks = [
+      {
+        objectKey: collective.objectKey, canonicalObjectKey: collective.objectKey,
+        originalFilename: '01.wav', checksumSha256: collective.checksumSha256,
+        technicalMetadata: collective.technicalMetadata, recordingTitle: 'One', trackNumber: 1
+      },
+      {
+        objectKey: 'aby/aud/demo/02.wav', canonicalObjectKey: 'aby/aud/demo/02.wav',
+        originalFilename: '02.wav', checksumSha256: 'b'.repeat(64),
+        technicalMetadata: collective.technicalMetadata, recordingTitle: 'Two', trackNumber: 2
+      }
+    ];
+    const preview = await repository.savePreview(collective);
+    await repository.commitPreview('owner-a', preview.id, 'Work', 'One', 'Album', 'Artist', undefined, '2007', undefined, undefined, [
+      { objectKey: collective.objectKey, recordingTitle: 'One', trackNumber: 1 },
+      { objectKey: 'aby/aud/demo/02.wav', recordingTitle: 'Two', trackNumber: 2 }
+    ]);
+    const initial = await repository.listCatalog('owner-a');
+    const albumId = initial[0]!.albumId!;
+
+    await repository.updateAlbum('owner-a', albumId, {
+      title: 'Sind', creator: 'Axel Dörner', releaseDate: '2007',
+      label: 'absinthRecords', catalogNumber: 'absinthRecords 010'
+    });
+    const updated = await repository.mergeAlbumMetadata('owner-a', albumId, {
+      imageCandidates: [{
+        authority: 'discogs', url: 'https://i.discogs.com/sind.jpeg', kind: 'cover',
+        exactRelease: true, sourceId: '1229980', provenance: {}
+      }]
+    });
+
+    expect(updated).toHaveLength(2);
+    expect(updated.map((item) => item.recordingTitle)).toEqual(['One', 'Two']);
+    for (const item of updated) {
+      expect(item.albumTitle).toBe('Sind');
+      expect(item.creator).toBe('Axel Dörner');
+      expect(item.label).toBe('absinthRecords');
+      expect(item.coverUrl).toBe('https://i.discogs.com/sind.jpeg');
+    }
+  });
+
   test('promotion switches authority and preserves the source as retirement provenance', async () => {
     const repository = new MemoryAbyRepository();
     const source = fixturePreview();

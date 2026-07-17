@@ -78,6 +78,19 @@ const normalizeName = (value: string) => value
   .replace(/[^a-z0-9]+/g, ' ')
   .trim();
 
+export function albumArtworkLookupTitle(creator: string, albumTitle: string) {
+  let title = albumTitle.trim();
+  const split = title.match(/^(.+?)\s+[-–—]\s+(.+)$/u);
+  if (split?.[1] && split[2]) {
+    const folderArtist = normalizeName(split[1]);
+    const expectedArtist = normalizeName(creator);
+    if (folderArtist === expectedArtist || folderArtist.includes(expectedArtist) || expectedArtist.includes(folderArtist)) {
+      title = split[2].trim();
+    }
+  }
+  return title.replace(/\s*\((?:18|19|20)\d{2}\)\s*$/u, '').trim() || albumTitle.trim();
+}
+
 const quoted = (value: string) => `"${value.replaceAll('\\', '\\\\').replaceAll('"', '\\"')}"`;
 
 async function jsonRequest<T>(fetcher: typeof fetch, url: URL, userAgent: string): Promise<T> {
@@ -124,13 +137,14 @@ export async function findAlbumArtwork(
   const config = readConfig();
   const fetcher = options.fetcher ?? fetch;
   const userAgent = `Aby/0.1.0 (${config.ABY_EXTERNAL_METADATA_CONTACT})`;
+  const lookupTitle = albumArtworkLookupTitle(input.creator, input.albumTitle);
   const url = new URL(`${config.MUSICBRAINZ_BASE_URL.replace(/\/+$/, '')}/release-group/`);
-  url.searchParams.set('query', `artist:${quoted(input.creator)} AND releasegroup:${quoted(input.albumTitle)}`);
+  url.searchParams.set('query', `artist:${quoted(input.creator)} AND releasegroup:${quoted(lookupTitle)}`);
   url.searchParams.set('fmt', 'json');
   url.searchParams.set('limit', '10');
   const result = await jsonRequest<{ 'release-groups'?: MusicBrainzReleaseGroup[] }>(fetcher, url, userAgent);
   const creator = normalizeName(input.creator);
-  const title = normalizeName(input.albumTitle);
+  const title = normalizeName(lookupTitle);
   const candidate = (result['release-groups'] ?? []).find((group) => {
     const artist = group['artist-credit']?.map((credit) => credit.name || credit.artist?.name || '').join(' ') ?? '';
     return normalizeName(group.title) === title && normalizeName(artist).includes(creator);

@@ -81,6 +81,17 @@ export const CandidateMetadataSchema = z.object({
     imageUrl: z.string().url().optional(),
     birthDate: z.string().optional()
   }).optional(),
+  discogs: z.object({
+    id: z.string().min(1),
+    title: z.string().min(1),
+    creator: z.string().min(1),
+    year: z.string().optional(),
+    label: z.string().optional(),
+    catalogNumber: z.string().optional(),
+    coverUrl: z.string().url().optional(),
+    canonicalUrl: z.string().url()
+  }).optional(),
+  discogsRefreshedAt: z.string().datetime().optional(),
   derivatives: z.array(z.object({
     kind: z.string(),
     objectKey: z.string(),
@@ -230,6 +241,15 @@ export const TrackEditSchema = z.object({
   catalogNumber: z.string().trim().max(500).nullable().optional()
 });
 export type TrackEdit = z.infer<typeof TrackEditSchema>;
+
+export const AlbumEditSchema = z.object({
+  title: z.string().trim().min(1).max(500),
+  creator: z.string().trim().max(500).nullable().optional(),
+  releaseDate: z.string().trim().max(500).nullable().optional(),
+  label: z.string().trim().max(500).nullable().optional(),
+  catalogNumber: z.string().trim().max(500).nullable().optional()
+});
+export type AlbumEdit = z.infer<typeof AlbumEditSchema>;
 
 export const SegmentCreateSchema = z.object({
   assetId: IdentifierSchema,

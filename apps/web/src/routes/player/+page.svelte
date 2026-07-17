@@ -7,6 +7,7 @@
   import { currentPlayback, currentPlaybackTimeMs, loadPlayback, loadSegmentPlayback } from '$lib/player';
   import SpectrogramView from '$lib/components/SpectrogramView.svelte';
   import TrackEditor from '$lib/components/TrackEditor.svelte';
+  import AlbumEditor from '$lib/components/AlbumEditor.svelte';
 
   const views = ['Cover', 'Spectrogram'] as const;
   let { data }: { data: PageData } = $props();
@@ -22,6 +23,7 @@
   let folderTreeOpen = $state(false);
   let openActionsId = $state<string | null>(null);
   let editingItem = $state<CatalogItem | null>(null);
+  let editingAlbumItems = $state<CatalogItem[] | null>(null);
   let itemGesture = { id: '', x: 0, y: 0 };
   let suppressClickId = '';
   let gestureStart = { x: 0, y: 0 };
@@ -122,6 +124,31 @@
     }
   });
 
+  onMount(() => {
+    const handleShortcut = async (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (target?.matches('input, textarea, select, button, [contenteditable="true"]')
+        || event.metaKey || event.ctrlKey || event.altKey || event.repeat) return;
+      if (event.code === 'Space') {
+        event.preventDefault();
+        const audio = document.querySelector<HTMLAudioElement>('.persistent-player audio');
+        if (audio) {
+          if (audio.paused) await audio.play().catch(() => {});
+          else audio.pause();
+        } else if (selected) {
+          await playItem(selected);
+        }
+      } else if (event.key.toLowerCase() === 'c' && $currentPlayback) {
+        event.preventDefault();
+        const endMs = $currentPlaybackTimeMs;
+        const startMs = Math.max(0, endMs - 5000);
+        if (endMs > startMs) await saveMobileSegment(startMs, endMs);
+      }
+    };
+    window.addEventListener('keydown', handleShortcut);
+    return () => window.removeEventListener('keydown', handleShortcut);
+  });
+
   function selectView(direction: number) {
     viewIndex = (viewIndex + direction + views.length) % views.length;
   }
@@ -184,12 +211,33 @@
 
   async function endItemGesture(event: PointerEvent, item: CatalogItem) {
     if (itemGesture.id !== item.asset.id) return;
+    const target = event.currentTarget as HTMLElement;
+    if (target.hasPointerCapture(event.pointerId)) target.releasePointerCapture(event.pointerId);
     const deltaX = event.clientX - itemGesture.x;
     const deltaY = event.clientY - itemGesture.y;
+    itemGesture = { id: '', x: 0, y: 0 };
     if (Math.abs(deltaX) < 64 || Math.abs(deltaX) <= Math.abs(deltaY)) return;
     suppressClickId = item.asset.id;
     if (deltaX > 0) openActionsId = openActionsId === item.asset.id ? null : item.asset.id;
     else await removeItem(item);
+  }
+
+  function cancelItemGesture(event: PointerEvent, item: CatalogItem) {
+    if (itemGesture.id !== item.asset.id) return;
+    const target = event.currentTarget as HTMLElement;
+    if (target.hasPointerCapture(event.pointerId)) target.releasePointerCapture(event.pointerId);
+    itemGesture = { id: '', x: 0, y: 0 };
+  }
+
+  function editItem(item: CatalogItem) {
+    openActionsId = null;
+    suppressClickId = '';
+    editingItem = item;
+  }
+
+  function editAlbum(albumItems: CatalogItem[]) {
+    openActionsId = null;
+    editingAlbumItems = albumItems;
   }
 
   function playFromCatalog(item: CatalogItem) {
@@ -216,6 +264,14 @@
     items = items.map((item) => item.asset.id === updated.asset.id ? updated : item);
     if (selected?.asset.id === updated.asset.id) selected = updated;
     if (editingItem?.asset.id === updated.asset.id) editingItem = updated;
+  }
+
+  function replaceAlbumItems(updated: CatalogItem[]) {
+    const replacements = new Map(updated.map((item) => [item.asset.id, item]));
+    items = items.map((item) => replacements.get(item.asset.id) ?? item);
+    if (selected) selected = replacements.get(selected.asset.id) ?? selected;
+    if (editingItem) editingItem = replacements.get(editingItem.asset.id) ?? editingItem;
+    editingAlbumItems = updated;
   }
 
   async function regenerateItem(item: CatalogItem) {
@@ -381,17 +437,20 @@
       </div>
     {/if}
     {#snippet trackRow(item: CatalogItem)}
-      <article class:selected={selected?.asset.id === item.asset.id} class:actions-open={openActionsId === item.asset.id} onpointerdown={(event) => startItemGesture(event, item)} onpointerup={(event) => endItemGesture(event, item)}>
-        <div class="item-actions" aria-hidden={openActionsId !== item.asset.id}>
-          <button onclick={() => regenerateItem(item)} title="Regenerate metadata" aria-label="Regenerate metadata">↻</button>
-          <button onclick={() => editingItem = item} title="Edit track" aria-label="Edit track">✎</button>
-        </div>
-        <button class="catalog-primary" onclick={() => playFromCatalog(item)}>
+      <article class:selected={selected?.asset.id === item.asset.id} class:actions-open={openActionsId === item.asset.id}>
+        {#if openActionsId === item.asset.id}
+          <div class="item-actions">
+            <button onclick={() => regenerateItem(item)} title="Regenerate metadata" aria-label="Regenerate metadata">↻</button>
+            <button onclick={() => editItem(item)} title="Edit track" aria-label="Edit track">✎</button>
+          </div>
+        {/if}
+        <button class="catalog-primary" onclick={() => playFromCatalog(item)} onpointerdown={(event) => startItemGesture(event, item)} onpointerup={(event) => endItemGesture(event, item)} onpointercancel={(event) => cancelItemGesture(event, item)}>
           <span class="catalog-index">{item.trackNumber ? String(item.trackNumber).padStart(2, '0') : '—'}</span>
           {#if item.coverUrl}<img src={item.coverUrl} alt="" />{:else}<span class="catalog-cover-fallback">A</span>{/if}
           <span class="catalog-copy"><strong>{item.recordingTitle}</strong><small>{item.creator ?? item.workTitle}</small></span>
           <span class="catalog-duration">{formatDuration(item.asset.technicalMetadata.durationMs)}</span>
         </button>
+        <button class="catalog-edit" onclick={() => editItem(item)} title="Edit track" aria-label={`Edit ${item.recordingTitle}`}>✎</button>
         {#if item.segments.length}<div class="catalog-segments">{#each item.segments as segment (segment.id)}<button onclick={() => playSegment(item, segment)}><span>{segment.label ?? 'Segment'}</span><small>{formatDuration(segment.startTimeMs)}–{formatDuration(segment.endTimeMs)}</small></button>{/each}</div>{/if}
       </article>
     {/snippet}
@@ -402,7 +461,7 @@
           {#each work.direct as item (item.asset.id)}{@render trackRow(item)}{/each}
           {#each work.albums as album (album.id)}
             <details class="album-group">
-              <summary><span>{album.title}</span><small>{album.items.length} tracks</small></summary>
+              <summary><span>{album.title}</span><span class="album-meta"><small>{album.items.length} tracks</small><button onclick={(event) => { event.preventDefault(); event.stopPropagation(); editAlbum(album.items); }} aria-label={`Edit album ${album.title}`} title="Edit album">✎</button></span></summary>
               {#each album.items as item (item.asset.id)}{@render trackRow(item)}{/each}
             </details>
           {/each}
@@ -417,10 +476,14 @@
 {#if editingItem}
   {#key editingItem.asset.id}<TrackEditor item={editingItem} onclose={() => editingItem = null} onsaved={replaceItem} />{/key}
 {/if}
+{#if editingAlbumItems?.[0]}
+  {#key editingAlbumItems[0].albumId}<AlbumEditor items={editingAlbumItems} onclose={() => editingAlbumItems = null} onsaved={replaceAlbumItems} />{/key}
+{/if}
 
 <style>
   .work-group>h3{margin:16px 14px 7px;font:600 11px/1.2 ui-monospace,monospace;letter-spacing:.08em;text-transform:uppercase;color:var(--signal)}
-  .album-group{margin:0;border-top:1px solid var(--line)}.album-group summary{display:flex;justify-content:space-between;align-items:center;padding:11px 14px;cursor:pointer;font-size:12px;background:#121411;list-style-position:inside}.album-group summary small{color:var(--muted);font:9px ui-monospace,monospace}.album-group[open] summary{background:#181b16}
-  .catalog-items article{position:relative;overflow:hidden;touch-action:pan-y}.catalog-primary{position:relative;z-index:1;transition:transform .16s ease;background:var(--surface)}.actions-open .catalog-primary{transform:translateX(92px)}
+  .album-group{margin:0;border-top:1px solid var(--line)}.album-group summary{display:flex;justify-content:space-between;align-items:center;padding:7px 8px 7px 14px;cursor:pointer;font-size:12px;background:#121411;list-style-position:inside}.album-group summary small{color:var(--muted);font:9px ui-monospace,monospace}.album-group[open] summary{background:#181b16}.album-meta{display:flex;align-items:center;gap:8px}.album-meta button{width:34px;height:30px;border:0;background:transparent;color:var(--muted);font-size:16px}.album-meta button:hover,.album-meta button:focus-visible{color:var(--signal)}
+  .catalog-items article{position:relative;overflow:hidden;touch-action:pan-y}.catalog-primary{position:relative;z-index:1;padding-right:68px;transition:transform .16s ease;background:var(--surface)}.actions-open .catalog-primary{transform:translateX(92px)}
   .item-actions{position:absolute;inset:0 auto 0 0;width:92px;display:grid;grid-template-columns:1fr 1fr;background:var(--signal)}.item-actions button{border:0;border-right:1px solid #1c2117;background:transparent;color:#10110f;font-size:20px}
+  .catalog-edit{position:absolute;z-index:2;top:50%;right:12px;width:38px;height:38px;padding:0;transform:translateY(-50%);border:0;background:transparent;color:var(--muted);font-size:17px}.catalog-edit:hover,.catalog-edit:focus-visible{color:var(--signal)}.actions-open .catalog-edit{pointer-events:none;opacity:0}
 </style>

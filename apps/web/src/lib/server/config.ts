@@ -31,6 +31,9 @@ const EnvironmentSchema = z.object({
   QDRANT_URL: optionalText,
   MUSICBRAINZ_BASE_URL: z.string().url().default('https://musicbrainz.org/ws/2'),
   COVER_ART_ARCHIVE_BASE_URL: z.string().url().default('https://coverartarchive.org'),
+  DISCOGS_BASE_URL: z.string().url().default('https://api.discogs.com'),
+  DISCOGS_CONSUMER_KEY: optionalText,
+  DISCOGS_CONSUMER_SECRET: optionalText,
   ABY_EXTERNAL_METADATA_CONTACT: z.string().trim().default('https://aby.zztt.org'),
   ACOUSTID_CLIENT_API_KEY: z.string().trim().default('8Xt5HI6Y')
 });
@@ -72,6 +75,7 @@ export function readConfig(environment: NodeJS.ProcessEnv = process.env) {
     databaseConfigured: Boolean(env.DATABASE_URL),
     wasabiConfigured: Boolean(env.WASABI_ENDPOINT && env.WASABI_REGION && env.WASABI_BUCKET && env.WASABI_ACCESS_KEY_ID && env.WASABI_SECRET_ACCESS_KEY),
     logtoConfigured: Boolean(env.LOGTO_ISSUER_URL && env.LOGTO_CLIENT_ID && env.LOGTO_CLIENT_SECRET),
+    discogsConfigured: Boolean(env.DISCOGS_CONSUMER_KEY && env.DISCOGS_CONSUMER_SECRET),
     qdrantConfigured: Boolean(env.QDRANT_URL)
   };
 }
