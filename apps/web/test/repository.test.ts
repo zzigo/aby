@@ -51,6 +51,21 @@ describe('preview-before-write repository flow', () => {
     expect(await repository.listCatalog('owner-a')).toHaveLength(0);
   });
 
+  test('sanitizes numeric prefixes at commit and edit boundaries', async () => {
+    const repository = new MemoryAbyRepository();
+    const preview = await repository.savePreview(fixturePreview());
+    const asset = await repository.commitPreview('owner-a', preview.id, 'Work', '07 Initial title');
+    let item = await repository.getCatalogItem('owner-a', asset.id);
+    expect(item?.recordingTitle).toBe('Initial title');
+    expect(item?.trackNumber).toBe(7);
+    item = await repository.updateCatalogItem('owner-a', asset.id, {
+      workTitle: 'Work', recordingTitle: '12 — Edited title', tags: ['solo']
+    });
+    expect(item.recordingTitle).toBe('Edited title');
+    expect(item.trackNumber).toBe(12);
+    expect(item.asset.canonicalMetadata.tags).toEqual(['solo']);
+  });
+
   test('commits individual titles for every track in a collective folder', async () => {
     const repository = new MemoryAbyRepository();
     const collective = fixturePreview();

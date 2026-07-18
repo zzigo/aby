@@ -1,3 +1,5 @@
+import { parseTrackFilename } from './track-title';
+
 export interface SourceRecord {
   objectKey: string;
   mediaKind: 'aud' | 'mov';
@@ -45,7 +47,8 @@ export function sourceRecord(key: string, config: SourcePrefixes): SourceRecord 
   const parts = key.split('/').filter(Boolean);
   const mediaKind = key.startsWith(config.sourceAudioPrefix) ? 'aud' : 'mov';
   const filename = parts.at(-1) ?? '';
-  const filenameWithoutExt = filename.replace(/\.[^/.]+$/, '');
+  const parsedFilename = parseTrackFilename(filename);
+  const filenameWithoutExt = parsedFilename.title;
   const folders = parts.slice(1, -1);
   const parentFolder = folders.at(-1) ?? '';
   const grandparentFolder = folders.at(-2) ?? '';

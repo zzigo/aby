@@ -86,8 +86,14 @@
     }
   }
 
+  function handleProgressPointerCancel(event: PointerEvent) {
+    if (!isDragging || !progressBarElement) return;
+    try { progressBarElement.releasePointerCapture(event.pointerId); } catch { /* pointer already released */ }
+    isDragging = false;
+  }
+
   function updateSeek(event: PointerEvent) {
-    if (!progressBarElement || durationMs === 0) return;
+    if (!audio || !progressBarElement || durationMs === 0) return;
     const rect = progressBarElement.getBoundingClientRect();
     const x = event.clientX - rect.left;
     const percent = Math.max(0, Math.min(1, x / rect.width));
@@ -102,6 +108,7 @@
     
     currentTimeMs = targetTimeMs;
     currentPlaybackTimeMs.set(currentTimeMs);
+    audio.currentTime = currentTimeMs / 1000;
   }
 
   onMount(() => {
@@ -144,13 +151,14 @@
       onpointerdown={handleProgressPointerDown}
       onpointermove={handleProgressPointerMove}
       onpointerup={handleProgressPointerUp}
+      onpointercancel={handleProgressPointerCancel}
       role="slider"
       aria-label="Playback progress slider"
       aria-valuemin="0"
       aria-valuemax={durationMs}
       aria-valuenow={currentTimeMs}
       tabindex="0"
-      style="position: absolute; inset: 0; cursor: pointer; display: flex; align-items: center; z-index: 1;"
+      style="position: absolute; inset: 0; cursor: ew-resize; display: flex; align-items: center; z-index: 1; touch-action: none;"
     >
       <!-- Progress Fill -->
       <div style="position: absolute; left: 0; top: 0; bottom: 0; width: {progressPercent}%; background: rgba(198, 255, 82, 0.16); pointer-events: none;"></div>
@@ -179,10 +187,30 @@
           {isPlaying ? 'PAUSE' : 'PLAY'}
         </button>
 
-        <span style="font-family: ui-monospace, monospace; font-size: 2.2rem; line-height: 1; color: var(--signal); font-weight: 300; letter-spacing: -0.05em; padding-left: 12px;">
+        <span class="player-time-display">
           {formatDuration(currentTimeMs)} / -{formatDuration(Math.max(0, durationMs - currentTimeMs))}
         </span>
       </div>
     </div>
   </aside>
 {/if}
+
+<style>
+  .player-time-display {
+    font-family: ui-monospace, monospace;
+    font-size: 1.1rem;
+    line-height: 1;
+    color: var(--signal);
+    font-weight: 300;
+    letter-spacing: -0.05em;
+    padding-left: 12px;
+  }
+
+  @media (max-width: 600px) {
+    .player-time-display {
+      font-size: 0.6rem;
+      letter-spacing: -0.02em;
+      padding-left: 4px;
+    }
+  }
+</style>

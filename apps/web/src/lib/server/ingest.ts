@@ -12,6 +12,7 @@ import { findAlbumArtwork, identifyWithMusicBrainz, getAudioFingerprint, lookupA
 import { fetchWikidataEntity } from './wikidata';
 import type { AbyRepository } from './repository';
 import { assertSourceObjectKey, downloadWasabiSourceObject, headWasabiSourceObject, normalizeObjectKey, listWasabiSiblingKeys } from './storage';
+import { parseTrackFilename } from './track-title';
 
 function pathSegment(value: string): string {
   const segment = value.normalize('NFC').replace(/\p{Cc}/gu, '').replaceAll('/', '／').trim();
@@ -19,15 +20,7 @@ function pathSegment(value: string): string {
   return segment;
 }
 
-export function parseTrackFilename(originalFilename: string): { title: string; trackNumber?: number; filename: string } {
-  const ext = extname(originalFilename).toLowerCase();
-  const base = basename(originalFilename, extname(originalFilename));
-  const match = base.match(/^\s*(\d{1,3})(?:\s*[.\-_]+\s*|\s+)(.+?)\s*$/u);
-  const trackNumber = match ? Number(match[1]) : undefined;
-  const title = pathSegment((match?.[2] ?? base).replace(/\s+/g, ' ').trim());
-  const prefix = trackNumber === undefined ? '' : `${String(trackNumber).padStart(2, '0')}-`;
-  return { title, ...(trackNumber !== undefined ? { trackNumber } : {}), filename: `${prefix}${title}${ext}` };
-}
+export { parseTrackFilename } from './track-title';
 
 export async function inspectFixture(ownerId: string, repository: AbyRepository): Promise<IngestPreview> {
   const config = readConfig();
@@ -116,7 +109,9 @@ export async function inspectWasabiSource(
       : input.entitySlug;
 
     const wikidata = creator ? await fetchWikidataEntity(creator) : null;
-    const recordingTitle = identification?.recordingTitle || input.recordingTitle || input.workTitle;
+    const parsedMainTrack = parseTrackFilename(basename(sourceObjectKey));
+    const requestedTrack = input.recordingTitle ? parseTrackFilename(`${input.recordingTitle}${extname(sourceObjectKey)}`) : null;
+    const recordingTitle = identification?.recordingTitle || requestedTrack?.title || parsedMainTrack.title || input.workTitle;
     const albumTitle = identification?.releaseTitle || (siblingKeys.length > 1 ? basename(dirname(sourceObjectKey)) : undefined);
     const alternativeCover = !identification?.cover && creator && albumTitle
       ? await findAlbumArtwork({ creator, albumTitle }).catch((error: unknown) => {
@@ -132,7 +127,6 @@ export async function inspectWasabiSource(
     });
     const canonicalPrefix = input.mediaKind === 'aud' ? config.audioPrefix : config.videoPrefix;
     
-    const parsedMainTrack = parseTrackFilename(basename(sourceObjectKey));
     const targetObjectKey = normalizeObjectKey([
       canonicalPrefix.replace(/\/$/, ''),
       input.collectionCode,

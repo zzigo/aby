@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { parseTrackFilename } from '../src/lib/server/ingest';
+import { parseTrackFilename, parseTrackTitle } from '../src/lib/server/track-title';
 
 test('extracts a leading track number and sanitizes the visible title', () => {
   expect(parseTrackFilename('02. O TESEO.mp3')).toEqual({
@@ -14,4 +14,9 @@ test('keeps an unnumbered track readable', () => {
   expect(parseTrackFilename('Sinking of the Titanic.mp3')).toEqual({
     title: 'Sinking of the Titanic', filename: 'Sinking of the Titanic.mp3'
   });
+});
+
+test('sanitizes a bare numeric track prefix from editable titles', () => {
+  expect(parseTrackTitle('22 track 22')).toEqual({ trackNumber: 22, title: 'track 22' });
+  expect(parseTrackTitle('03 — AHI, CHE NON PUR')).toEqual({ trackNumber: 3, title: 'AHI, CHE NON PUR' });
 });

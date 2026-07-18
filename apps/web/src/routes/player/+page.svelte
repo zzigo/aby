@@ -10,6 +10,7 @@
   import AlbumEditor from '$lib/components/AlbumEditor.svelte';
 
   const views = ['Cover', 'Spectrogram'] as const;
+  type CatalogMode = 'album' | 'work' | 'creator' | 'folder' | 'tag';
   let { data }: { data: PageData } = $props();
   let items = $state<CatalogItem[]>([]);
   let selected = $state<CatalogItem | null>(null);
@@ -17,6 +18,8 @@
   let drawerOpen = $state(false);
   let loading = $state(true);
   let message = $state('');
+  let catalogMode = $state<CatalogMode>('album');
+  let catalogQuery = $state('');
   let activeFolder = $state<string | null>(null);
   let favoriteFolders = $state<string[]>([]);
   let recentFolders = $state<string[]>([]);
@@ -44,7 +47,21 @@
   });
   const shortcutFolders = $derived([...favoriteFolders, ...recentFolders]
     .filter((path, index, paths) => paths.indexOf(path) === index && folderOptions.includes(path)).slice(0, 5));
-  const visibleItems = $derived(activeFolder ? items.filter((item) => item.asset.objectKey.startsWith(`${activeFolder}/`)) : items);
+  const visibleItems = $derived.by(() => {
+    const folderItems = activeFolder ? items.filter((item) => item.asset.objectKey.startsWith(`${activeFolder}/`)) : items;
+    const query = catalogQuery.trim().toLocaleLowerCase();
+    if (!query) return folderItems;
+    return folderItems.filter((item) => [
+      item.workTitle, item.albumTitle, item.recordingTitle, item.creator,
+      item.asset.canonicalMetadata.collectionCode, item.asset.objectKey,
+      ...(item.asset.canonicalMetadata.tags ?? []),
+      ...Object.values(item.asset.technicalMetadata.tags)
+    ].some((value) => value?.toLocaleLowerCase().includes(query)));
+  });
+  const sortTracks = (tracks: CatalogItem[]) => tracks.sort((a, b) =>
+    (a.trackNumber ?? Number.MAX_SAFE_INTEGER) - (b.trackNumber ?? Number.MAX_SAFE_INTEGER)
+    || a.recordingTitle.localeCompare(b.recordingTitle, undefined, { numeric: true })
+  );
   const catalogGroups = $derived.by(() => {
     const works = new SvelteMap<string, { id: string; title: string; direct: CatalogItem[]; albums: SvelteMap<string, { id: string; title: string; items: CatalogItem[] }> }>();
     for (const item of visibleItems) {
@@ -59,16 +76,68 @@
         album.items.push(item);
       } else work.direct.push(item);
     }
-    const sortTracks = (tracks: CatalogItem[]) => tracks.sort((a, b) =>
-      (a.trackNumber ?? Number.MAX_SAFE_INTEGER) - (b.trackNumber ?? Number.MAX_SAFE_INTEGER)
-      || a.recordingTitle.localeCompare(b.recordingTitle, undefined, { numeric: true })
-    );
     return [...works.values()].map((work) => ({
       ...work, direct: sortTracks(work.direct),
       albums: [...work.albums.values()].map((album) => ({ ...album, items: sortTracks(album.items) }))
         .sort((a, b) => a.title.localeCompare(b.title))
     })).sort((a, b) => a.title.localeCompare(b.title));
   });
+  const albumGroups = $derived.by(() => {
+    const groups = new SvelteMap<string, { id: string; title: string; albumId?: string; items: CatalogItem[] }>();
+    for (const item of visibleItems) {
+      const id = item.albumId ?? `direct:${item.asset.workId}`;
+      let group = groups.get(id);
+      if (!group) {
+        group = { id, title: item.albumTitle ?? item.workTitle, ...(item.albumId ? { albumId: item.albumId } : {}), items: [] };
+        groups.set(id, group);
+      }
+      group.items.push(item);
+    }
+    return [...groups.values()].map((group) => ({ ...group, items: sortTracks(group.items) }))
+      .sort((left, right) => left.title.localeCompare(right.title));
+  });
+  const creatorGroups = $derived.by(() => nestedGroups(visibleItems, (item) => item.creator || 'Unknown', (item) => item.workTitle));
+  const folderGroups = $derived.by(() => nestedGroups(
+    visibleItems,
+    (item) => item.asset.canonicalMetadata.collectionCode || item.asset.objectKey.split('/')[2] || 'uncatalogued',
+    (item) => item.creator || item.asset.objectKey.split('/')[3] || 'Unknown'
+  ));
+  const tagGroups = $derived.by(() => {
+    const groups = new SvelteMap<string, { id: string; title: string; items: CatalogItem[] }>();
+    for (const item of visibleItems) {
+      const labels = item.asset.canonicalMetadata.tags?.length
+        ? item.asset.canonicalMetadata.tags
+        : [item.asset.canonicalMetadata.collectionCode || 'untagged'];
+      for (const label of labels) {
+        const id = label.toLocaleLowerCase();
+        let group = groups.get(id);
+        if (!group) { group = { id, title: label, items: [] }; groups.set(id, group); }
+        group.items.push(item);
+      }
+    }
+    return [...groups.values()].map((group) => ({ ...group, items: sortTracks(group.items) }))
+      .sort((left, right) => left.title.localeCompare(right.title));
+  });
+
+  function nestedGroups(source: CatalogItem[], parentTitle: (item: CatalogItem) => string, childTitle: (item: CatalogItem) => string) {
+    const parents = new SvelteMap<string, { id: string; title: string; children: SvelteMap<string, { id: string; title: string; items: CatalogItem[] }> }>();
+    for (const item of source) {
+      const title = parentTitle(item);
+      const id = title.toLocaleLowerCase();
+      let parent = parents.get(id);
+      if (!parent) { parent = { id, title, children: new SvelteMap() }; parents.set(id, parent); }
+      const nestedTitle = childTitle(item);
+      const nestedId = nestedTitle.toLocaleLowerCase();
+      let child = parent.children.get(nestedId);
+      if (!child) { child = { id: nestedId, title: nestedTitle, items: [] }; parent.children.set(nestedId, child); }
+      child.items.push(item);
+    }
+    return [...parents.values()].map((parent) => ({
+      id: parent.id, title: parent.title,
+      children: [...parent.children.values()].map((child) => ({ ...child, items: sortTracks(child.items) }))
+        .sort((left, right) => left.title.localeCompare(right.title))
+    })).sort((left, right) => left.title.localeCompare(right.title));
+  }
 
   function folderLabel(path: string) {
     return path.replace(/^aby\//, '');
@@ -419,6 +488,16 @@
       <strong>Catalog</strong>
       <small>{items.length} items · {drawerOpen ? 'swipe down to close' : 'swipe up to browse'}</small>
     </button>
+    <div class="catalog-header">
+      <div class="catalog-modes" role="toolbar" aria-label="Catalog grouping">
+        <button class:active={catalogMode === 'album'} onclick={() => catalogMode = 'album'} title="Albums" aria-label="Group by album">▣</button>
+        <button class:active={catalogMode === 'work'} onclick={() => catalogMode = 'work'} title="Works and versions" aria-label="Group by work and version">≋</button>
+        <button class:active={catalogMode === 'creator'} onclick={() => catalogMode = 'creator'} title="Composers and works" aria-label="Group by composer">♯</button>
+        <button class:active={catalogMode === 'folder'} onclick={() => catalogMode = 'folder'} title="Canonical folders" aria-label="Group by folder">⌑</button>
+        <button class:active={catalogMode === 'tag'} onclick={() => catalogMode = 'tag'} title="Tags" aria-label="Group by tag">#</button>
+      </div>
+      <label class="catalog-search"><span>⌕</span><input bind:value={catalogQuery} type="search" placeholder="SEARCH" aria-label="Search catalog" /></label>
+    </div>
     <div class="folder-shortcuts" aria-label="Canonical Aby folders">
       <button class:active={activeFolder === null} onclick={() => selectFolder(null)}>All</button>
       {#each shortcutFolders as folder (folder)}
@@ -455,20 +534,35 @@
       </article>
     {/snippet}
     <div class="catalog-items">
-      {#each catalogGroups as work (work.id)}
-        <section class="work-group">
-          <h3>{work.title}</h3>
-          {#each work.direct as item (item.asset.id)}{@render trackRow(item)}{/each}
-          {#each work.albums as album (album.id)}
-            <details class="album-group">
-              <summary><span>{album.title}</span><span class="album-meta"><small>{album.items.length} tracks</small><button onclick={(event) => { event.preventDefault(); event.stopPropagation(); editAlbum(album.items); }} aria-label={`Edit album ${album.title}`} title="Edit album">✎</button></span></summary>
-              {#each album.items as item (item.asset.id)}{@render trackRow(item)}{/each}
-            </details>
-          {/each}
-        </section>
+      {#if catalogMode === 'album'}
+        {#each albumGroups as album (album.id)}
+          <details class="album-group ontology-root">
+            <summary><span>{album.title}</span><span class="album-meta"><small>{album.items.length} tracks</small>{#if album.albumId}<button onclick={(event) => { event.preventDefault(); event.stopPropagation(); editAlbum(album.items); }} aria-label={`Edit album ${album.title}`} title="Edit album">✎</button>{/if}</span></summary>
+            {#each album.items as item (item.asset.id)}{@render trackRow(item)}{/each}
+          </details>
+        {:else}<p class="catalog-empty">No matching items.</p>{/each}
+      {:else if catalogMode === 'work'}
+        {#each catalogGroups as work (work.id)}
+          <section class="work-group"><h3>{work.title}</h3>
+            {#each work.direct as item (item.asset.id)}{@render trackRow(item)}{/each}
+            {#each work.albums as album (album.id)}
+              <details class="album-group"><summary><span>{album.title}</span><span class="album-meta"><small>version · {album.items.length}</small><button onclick={(event) => { event.preventDefault(); event.stopPropagation(); editAlbum(album.items); }} aria-label={`Edit version ${album.title}`} title="Edit album version">✎</button></span></summary>{#each album.items as item (item.asset.id)}{@render trackRow(item)}{/each}</details>
+            {/each}
+          </section>
+        {:else}<p class="catalog-empty">No matching items.</p>{/each}
+      {:else if catalogMode === 'creator'}
+        {#each creatorGroups as creator (creator.id)}
+          <section class="work-group"><h3>{creator.title}</h3>{#each creator.children as work (work.id)}<details class="album-group"><summary><span>{work.title}</span><small>{work.items.length}</small></summary>{#each work.items as item (item.asset.id)}{@render trackRow(item)}{/each}</details>{/each}</section>
+        {:else}<p class="catalog-empty">No matching items.</p>{/each}
+      {:else if catalogMode === 'folder'}
+        {#each folderGroups as folder (folder.id)}
+          <section class="work-group"><h3>{folder.title}</h3>{#each folder.children as entity (entity.id)}<details class="album-group"><summary><span>{entity.title}</span><small>{entity.items.length}</small></summary>{#each entity.items as item (item.asset.id)}{@render trackRow(item)}{/each}</details>{/each}</section>
+        {:else}<p class="catalog-empty">No matching items.</p>{/each}
       {:else}
-        <p class="catalog-empty">{items.length ? 'No items in this Aby folder.' : 'The catalog is empty.'}</p>
-      {/each}
+        {#each tagGroups as tag (tag.id)}
+          <section class="work-group"><h3>#{tag.title}</h3>{#each tag.items as item (item.asset.id)}{@render trackRow(item)}{/each}</section>
+        {:else}<p class="catalog-empty">No matching items.</p>{/each}
+      {/if}
     </div>
   </aside>
 </main>
@@ -482,6 +576,7 @@
 
 <style>
   .work-group>h3{margin:16px 14px 7px;font:600 11px/1.2 ui-monospace,monospace;letter-spacing:.08em;text-transform:uppercase;color:var(--signal)}
+  .catalog-header{height:48px;display:flex;align-items:center;gap:12px;padding:0 14px;border-bottom:1px solid var(--line);background:#0e0f0e}.catalog-modes{display:flex;gap:2px}.catalog-modes button{width:34px;height:34px;padding:0;border:0;background:transparent;color:var(--muted);font:16px ui-monospace,monospace}.catalog-modes button.active{background:var(--signal);color:#10110f}.catalog-search{height:34px;min-width:100px;flex:1;display:flex;align-items:center;gap:7px;border-bottom:1px solid #3b3f39;color:var(--muted)}.catalog-search input{width:100%;min-width:0;border:0;background:transparent;color:#fff;outline:0;font:10px ui-monospace,monospace;letter-spacing:.08em}.ontology-root{border-top:0;border-bottom:1px solid var(--line)}
   .album-group{margin:0;border-top:1px solid var(--line)}.album-group summary{display:flex;justify-content:space-between;align-items:center;padding:7px 8px 7px 14px;cursor:pointer;font-size:12px;background:#121411;list-style-position:inside}.album-group summary small{color:var(--muted);font:9px ui-monospace,monospace}.album-group[open] summary{background:#181b16}.album-meta{display:flex;align-items:center;gap:8px}.album-meta button{width:34px;height:30px;border:0;background:transparent;color:var(--muted);font-size:16px}.album-meta button:hover,.album-meta button:focus-visible{color:var(--signal)}
   .catalog-items article{position:relative;overflow:hidden;touch-action:pan-y}.catalog-primary{position:relative;z-index:1;padding-right:68px;transition:transform .16s ease;background:var(--surface)}.actions-open .catalog-primary{transform:translateX(92px)}
   .item-actions{position:absolute;inset:0 auto 0 0;width:92px;display:grid;grid-template-columns:1fr 1fr;background:var(--signal)}.item-actions button{border:0;border-right:1px solid #1c2117;background:transparent;color:#10110f;font-size:20px}

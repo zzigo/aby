@@ -1,6 +1,7 @@
 <script lang="ts">
   import { untrack } from 'svelte';
   import type { CatalogItem } from '@zztt/aby-domain';
+  import MetadataQueryLab from './MetadataQueryLab.svelte';
 
   let { item, onclose, onsaved }: { item: CatalogItem; onclose: () => void; onsaved: (item: CatalogItem) => void } = $props();
   let workTitle = $state(untrack(() => item.workTitle));
@@ -12,6 +13,7 @@
   let releaseDate = $state(untrack(() => item.releaseDate ?? ''));
   let label = $state(untrack(() => item.label ?? ''));
   let catalogNumber = $state(untrack(() => item.asset.canonicalMetadata.catalogNumber ?? ''));
+  let tags = $state(untrack(() => item.asset.canonicalMetadata.tags?.join(', ') ?? ''));
   let artists = $state<Array<{ id: string; name: string; disambiguation: string }>>([]);
   let message = $state('');
   let busy = $state(false);
@@ -43,7 +45,8 @@
         body: JSON.stringify({
           workTitle, albumTitle: albumTitle || null, recordingTitle,
           trackNumber: trackNumber || null, creator: creator || null, date: date || null,
-          releaseDate: releaseDate || null, label: label || null, catalogNumber: catalogNumber || null
+          releaseDate: releaseDate || null, label: label || null, catalogNumber: catalogNumber || null,
+          tags: tags.split(',').map((tag) => tag.trim()).filter(Boolean)
         })
       });
       onsaved(body.item); message = 'Saved';
@@ -102,6 +105,7 @@
         <label>Release<input bind:value={releaseDate} /></label>
         <label>Label<input bind:value={label} /></label>
         <label>Catalog no.<input bind:value={catalogNumber} /></label>
+        <label class="artist">Tags<input bind:value={tags} placeholder="electroacoustic, trumpet, solo" /></label>
       </div>
       <div class="dependencies"><span>WORK {item.asset.workId}</span><span>ALBUM {item.albumId ?? '—'}</span><span>TRACK {item.asset.recordingId}</span></div>
     </section>
@@ -115,13 +119,9 @@
     </section>
 
     <section class="emergent">
-      <div class="section-title"><h2>Emergent / services</h2><button onclick={regenerate} disabled={busy}>↻ Refresh</button></div>
-      <dl>
-        <dt>MusicBrainz</dt><dd>{item.asset.canonicalMetadata.identificationCandidates?.[0]?.title ?? 'No candidate'}</dd>
-        <dt>Wikidata</dt><dd>{item.asset.canonicalMetadata.wikidata?.label ?? 'No entity'}</dd>
-        <dt>Artwork</dt><dd>{item.asset.canonicalMetadata.imageCandidates?.[0]?.authority ?? 'No candidate'}</dd>
-      </dl>
-      <pre>{JSON.stringify({ identification: item.asset.canonicalMetadata.identificationCandidates, wikidata: item.asset.canonicalMetadata.wikidata, images: item.asset.canonicalMetadata.imageCandidates }, null, 2)}</pre>
+      <div class="section-title"><h2>Service queries</h2><button onclick={regenerate} disabled={busy} title="Regenerate canonical metadata from audio">↻ Canonical</button></div>
+      <dl><dt>Canonical ID</dt><dd>{item.asset.canonicalMetadata.identificationCandidates?.[0]?.title ?? '—'}</dd><dt>Entity</dt><dd>{item.asset.canonicalMetadata.wikidata?.label ?? '—'}</dd><dt>Image</dt><dd>{item.asset.canonicalMetadata.imageCandidates?.[0]?.authority ?? '—'}</dd></dl>
+      <MetadataQueryLab assetId={item.asset.id} {creator} trackTitle={recordingTitle} {albumTitle} year={releaseDate} durationMs={item.asset.technicalMetadata.durationMs} />
     </section>
 
     <section class="technical">

@@ -1,6 +1,7 @@
 <script lang="ts">
   import { untrack } from 'svelte';
   import type { CatalogItem } from '@zztt/aby-domain';
+  import MetadataQueryLab from './MetadataQueryLab.svelte';
 
   interface DiscogsCandidate {
     id: string;
@@ -160,6 +161,10 @@
         {:else}
           <p>No candidate</p>
         {/if}
+      </section>
+      <section class="queries" style="grid-column:1">
+        <h2>Service queries</h2>
+        <MetadataQueryLab assetId={first.asset.id} {creator} trackTitle={first.recordingTitle} albumTitle={title} year={releaseDate} durationMs={first.asset.technicalMetadata.durationMs} />
       </section>
     </main>
 

@@ -56,6 +56,7 @@ export const CandidateMetadataSchema = z.object({
   catalogNumber: z.string().optional(),
   entitySlug: z.string().regex(/^[a-z0-9]+$/).optional(),
   collectionCode: z.string().optional(),
+  tags: z.array(z.string().trim().min(1).max(100)).max(50).optional(),
   canonicalObjectKey: z.string().optional(),
   identificationCandidates: z.array(z.object({
     authority: z.string().min(1),
@@ -238,7 +239,8 @@ export const TrackEditSchema = z.object({
   date: z.string().trim().max(500).nullable().optional(),
   releaseDate: z.string().trim().max(500).nullable().optional(),
   label: z.string().trim().max(500).nullable().optional(),
-  catalogNumber: z.string().trim().max(500).nullable().optional()
+  catalogNumber: z.string().trim().max(500).nullable().optional(),
+  tags: z.array(z.string().trim().min(1).max(100)).max(50).optional()
 });
 export type TrackEdit = z.infer<typeof TrackEditSchema>;
 

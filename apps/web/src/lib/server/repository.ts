@@ -3,6 +3,7 @@ import pg from 'pg';
 import type { AlbumEdit, Asset, CatalogItem, ConversionSettings, IngestPreview, Provenance, Segment, SegmentCreate, TrackEdit } from '@zztt/aby-domain';
 import { AbyError } from './errors';
 import { readConfig } from './config';
+import { parseTrackTitle } from './track-title';
 
 export interface SpectrogramSummary {
   descriptors: { energy: number; brightness: number; motion: number; gravity: number; tension: number };
@@ -118,6 +119,7 @@ export class MemoryAbyRepository implements AbyRepository {
   ): Promise<Asset> {
     const preview = this.#previews.get(previewId);
     if (!preview || preview.ownerId !== ownerId) throw new AbyError('preview_not_found', 'Ingest preview not found', 404);
+    const parsedRecording = parseTrackTitle(recordingTitle);
     if (preview.status === 'rejected') throw new AbyError('preview_not_committable', 'Rejected previews cannot be committed', 409);
     if (preview.candidateMetadata.canonicalObjectKey && preview.candidateMetadata.canonicalObjectKey !== preview.objectKey) {
       throw new AbyError('promotion_required', 'The source must be copied, verified and promoted before canonical commit', 409);
@@ -134,7 +136,7 @@ export class MemoryAbyRepository implements AbyRepository {
       if (existing.checksumSha256 !== preview.checksumSha256) {
         throw new AbyError('canonical_asset_conflict', 'Canonical object key is already registered with a different checksum', 409);
       }
-      if (existing.canonicalMetadata.title !== workTitle || existing.canonicalMetadata.recordingTitle !== recordingTitle) {
+      if (existing.canonicalMetadata.title !== workTitle || existing.canonicalMetadata.recordingTitle !== parsedRecording.title) {
         throw new AbyError('canonical_metadata_conflict', 'Canonical asset already exists with different work or recording metadata', 409);
       }
       this.#previews.set(preview.id, { ...preview, status: 'committed' });
@@ -150,8 +152,8 @@ export class MemoryAbyRepository implements AbyRepository {
       originalFilename: preview.originalFilename,
       checksumSha256: preview.checksumSha256,
       technicalMetadata: preview.technicalMetadata,
-      recordingTitle: recordingTitle,
-      trackNumber: preview.candidateMetadata.trackNumber
+      recordingTitle: parsedRecording.title,
+      trackNumber: preview.candidateMetadata.trackNumber ?? parsedRecording.trackNumber
     }];
 
     const finalCreator = creator !== undefined ? creator : preview.candidateMetadata.creator;
@@ -165,8 +167,9 @@ export class MemoryAbyRepository implements AbyRepository {
 
     for (const track of tracks) {
       const override = overrides.get(track.objectKey);
-      const finalTrackTitle = override?.recordingTitle ?? track.recordingTitle;
-      const finalTrackNumber = override?.trackNumber ?? track.trackNumber;
+      const parsedTrack = parseTrackTitle(override?.recordingTitle ?? track.recordingTitle);
+      const finalTrackTitle = parsedTrack.title;
+      const finalTrackNumber = override?.trackNumber ?? track.trackNumber ?? parsedTrack.trackNumber;
       const duplicateChecksum = [...this.#assets.values()].find(
         (value) => value.ownerId === ownerId && value.checksumSha256 === track.checksumSha256
       );
@@ -258,17 +261,19 @@ export class MemoryAbyRepository implements AbyRepository {
   async updateCatalogItem(ownerId: string, assetId: string, input: TrackEdit): Promise<CatalogItem> {
     const asset = this.#assets.get(assetId);
     if (!asset || asset.ownerId !== ownerId) throw new AbyError('asset_not_found', 'Asset not found', 404);
+    const parsedTrack = parseTrackTitle(input.recordingTitle);
     asset.canonicalMetadata = {
       ...asset.canonicalMetadata,
       title: input.workTitle,
-      recordingTitle: input.recordingTitle,
+      recordingTitle: parsedTrack.title,
       ...(input.albumTitle ? { albumTitle: input.albumTitle } : { albumTitle: undefined }),
-      ...(input.trackNumber ? { trackNumber: input.trackNumber } : { trackNumber: undefined }),
+      ...(input.trackNumber || parsedTrack.trackNumber ? { trackNumber: input.trackNumber || parsedTrack.trackNumber } : { trackNumber: undefined }),
       ...(input.creator ? { creator: input.creator } : { creator: undefined }),
       ...(input.date ? { date: input.date } : { date: undefined }),
       ...(input.releaseDate ? { releaseDate: input.releaseDate } : { releaseDate: undefined }),
       ...(input.label ? { label: input.label } : { label: undefined }),
-      ...(input.catalogNumber ? { catalogNumber: input.catalogNumber } : { catalogNumber: undefined })
+      ...(input.catalogNumber ? { catalogNumber: input.catalogNumber } : { catalogNumber: undefined }),
+      tags: input.tags ?? asset.canonicalMetadata.tags
     };
     return (await this.getCatalogItem(ownerId, assetId))!;
   }
@@ -462,6 +467,7 @@ export class PostgresAbyRepository implements AbyRepository {
       const result = await client.query('SELECT * FROM aby.ingest_candidates WHERE id=$1 AND owner_id=$2 FOR UPDATE', [previewId, ownerId]);
       const preview = result.rows[0];
       if (!preview) throw new AbyError('preview_not_found', 'Ingest preview not found', 404);
+      const parsedRecording = parseTrackTitle(recordingTitle);
       if (preview.status === 'committed') {
         if (!preview.committed_asset_id) {
           throw new AbyError('committed_asset_missing', 'Committed preview no longer points to an asset', 409);
@@ -490,8 +496,8 @@ export class PostgresAbyRepository implements AbyRepository {
         originalFilename: preview.original_filename,
         checksumSha256: preview.checksum_sha256,
         technicalMetadata: preview.technical_metadata,
-        recordingTitle: recordingTitle,
-        trackNumber: preview.candidate_metadata.trackNumber
+        recordingTitle: parsedRecording.title,
+        trackNumber: preview.candidate_metadata.trackNumber ?? parsedRecording.trackNumber
       }];
 
       const finalCreator = creator !== undefined ? creator : preview.candidate_metadata.creator;
@@ -534,8 +540,9 @@ export class PostgresAbyRepository implements AbyRepository {
       // 2. Insert all tracks
       for (const track of tracks) {
         const override = overrides.get(track.objectKey);
-        const finalTrackTitle = override?.recordingTitle ?? track.recordingTitle;
-        const finalTrackNumber = override?.trackNumber ?? track.trackNumber;
+        const parsedTrack = parseTrackTitle(override?.recordingTitle ?? track.recordingTitle);
+        const finalTrackTitle = parsedTrack.title;
+        const finalTrackNumber = override?.trackNumber ?? track.trackNumber ?? parsedTrack.trackNumber;
         const recordingId = randomUUID();
         const assetId = randomUUID();
 
@@ -788,6 +795,8 @@ export class PostgresAbyRepository implements AbyRepository {
       );
       const row = found.rows[0];
       if (!row) throw new AbyError('asset_not_found', 'Asset not found', 404);
+      const parsedTrack = parseTrackTitle(input.recordingTitle);
+      const finalTrackNumber = input.trackNumber ?? parsedTrack.trackNumber;
 
       await client.query('UPDATE aby.works SET title=$1,updated_at=now() WHERE id=$2 AND owner_id=$3', [input.workTitle, row.work_id, ownerId]);
 
@@ -807,26 +816,28 @@ export class PostgresAbyRepository implements AbyRepository {
 
       const recordingMetadata = {
         ...row.recording_metadata,
-        trackNumber: input.trackNumber ?? undefined,
+        trackNumber: finalTrackNumber,
         releaseDate: input.releaseDate ?? undefined,
         label: input.label ?? undefined,
-        catalogNumber: input.catalogNumber ?? undefined
+        catalogNumber: input.catalogNumber ?? undefined,
+        tags: input.tags ?? row.recording_metadata.tags
       };
       const canonicalMetadata = {
         ...row.canonical_metadata,
         title: input.workTitle,
-        recordingTitle: input.recordingTitle,
+        recordingTitle: parsedTrack.title,
         albumTitle: albumTitle ?? undefined,
-        trackNumber: input.trackNumber ?? undefined,
+        trackNumber: finalTrackNumber,
         creator: input.creator ?? undefined,
         date: input.date ?? undefined,
         releaseDate: input.releaseDate ?? undefined,
         label: input.label ?? undefined,
-        catalogNumber: input.catalogNumber ?? undefined
+        catalogNumber: input.catalogNumber ?? undefined,
+        tags: input.tags ?? row.canonical_metadata.tags
       };
       await client.query(
         'UPDATE aby.recordings SET album_id=$1,title=$2,metadata=$3,updated_at=now() WHERE id=$4 AND owner_id=$5',
-        [albumId, input.recordingTitle, recordingMetadata, row.recording_id, ownerId]
+        [albumId, parsedTrack.title, recordingMetadata, row.recording_id, ownerId]
       );
       await client.query('UPDATE aby.assets SET canonical_metadata=$1,updated_at=now() WHERE id=$2 AND owner_id=$3', [canonicalMetadata, assetId, ownerId]);
       await client.query('COMMIT');
