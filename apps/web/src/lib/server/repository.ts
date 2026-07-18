@@ -105,7 +105,7 @@ function albumReleaseFields(input: AlbumEdit, albumArtist: string | null | undef
       role: repairLegacyDiacritics(role.role)
     })) } : {}),
     ...(input.notes !== undefined ? { albumNotes: input.notes ? repairLegacyDiacritics(input.notes) : input.notes } : {}),
-    ...(input.collectionCode !== undefined ? { collectionCode: input.collectionCode.toUpperCase() } : {})
+    ...(input.collectionCode !== undefined ? { collectionCode: input.collectionCode } : {})
   };
 }
 

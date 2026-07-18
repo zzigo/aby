@@ -183,6 +183,7 @@ describe('preview-before-write repository flow', () => {
     const initial = await repository.listCatalog('owner-a');
     const updated = await repository.updateAlbum('owner-a', initial[0]!.albumId!, {
       title: 'Album',
+      collectionCode: 'ens',
       tracks: initial.map((item, index) => ({
         assetId: item.asset.id,
         recordingTitle: index === 0 ? 'One' : 'Two',
@@ -190,6 +191,7 @@ describe('preview-before-write repository flow', () => {
       }))
     });
     expect(updated.map((item) => [item.trackNumber, item.recordingTitle])).toEqual([[1, 'One'], [2, 'Two']]);
+    expect(updated.every((item) => item.asset.canonicalMetadata.collectionCode === 'ens')).toBe(true);
   });
 
   test('relocates canonical identity while retaining a verified cleanup candidate', async () => {

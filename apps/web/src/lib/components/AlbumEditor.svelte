@@ -459,8 +459,8 @@
         </div>
         <div class="duration-compare"><span>DECLARED {albumDuration || '—'}</span><span>ASSETS {formatDuration(localDurationMs)}</span></div>
         <div class="relocation-actions">
-          {#if collectionCode.trim().toUpperCase() !== canonicalCollectionCode || entitySlug.trim() !== canonicalEntitySlug}
-            <button onclick={relocateCatalogPath} disabled={busy}>COPY + VERIFY {canonicalCollectionCode}/{canonicalEntitySlug} → {collectionCode.trim().toUpperCase()}/{entitySlug.trim()}</button>
+          {#if collectionCode.trim() !== canonicalCollectionCode || entitySlug.trim() !== canonicalEntitySlug}
+            <button onclick={relocateCatalogPath} disabled={busy}>COPY + VERIFY {canonicalCollectionCode}/{canonicalEntitySlug} → {collectionCode.trim()}/{entitySlug.trim()}</button>
           {/if}
           {#if relocationPending}<button class="retire" onclick={retireOldCopies} disabled={busy}>DELETE {relocationPending} VERIFIED OLD COPIES</button>{/if}
         </div>

@@ -12,7 +12,7 @@ import { copyWasabiCanonicalObject, deleteWasabiCanonicalObject, downloadWasabiO
 import type { RequestHandler } from './$types';
 
 const inputSchema = z.object({
-  collectionCode: z.string().trim().regex(/^[A-Za-z0-9]{1,8}$/).transform((value) => value.toUpperCase()),
+  collectionCode: z.string().trim().regex(/^[A-Za-z0-9]{1,8}$/),
   entitySlug: z.string().trim().regex(/^[a-z0-9]+$/).optional(),
   limit: z.number().int().min(1).max(5).default(3)
 });
