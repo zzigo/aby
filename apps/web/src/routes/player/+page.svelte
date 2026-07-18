@@ -532,7 +532,13 @@
                 <span class="cover-fallback"><small>{selected.albumArtist ?? selected.creator ?? 'Aby'}</small><strong>{selected.albumTitle ?? selected.workTitle}</strong></span>
               {/if}
             </button>
-            <button class="cover-back" onclick={() => coverFlipped = false} aria-label="Return to cover">
+            <section class="cover-back" aria-label="Album metadata">
+              <button class="flip-back-control" onclick={() => coverFlipped = false} aria-label="Return to cover" title="Return to cover">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M15.5 5.5 9 12l6.5 6.5" />
+                  <path d="M9.5 5.5H19v13H9.5" />
+                </svg>
+              </button>
               <dl>
                 <div><dt>Track</dt><dd>{displayTrackTitle(selected.recordingTitle, selected.trackNumber)}</dd></div>
                 <div><dt>Album</dt><dd>{selected.albumTitle ?? '—'}</dd></div>
@@ -544,7 +550,7 @@
                 <div><dt>Length</dt><dd>{formatDuration(selected.asset.technicalMetadata.durationMs)}</dd></div>
                 <div class="notes"><dt>Notes</dt><dd>{selected.asset.canonicalMetadata.notes ?? selected.asset.canonicalMetadata.albumNotes ?? '—'}</dd></div>
               </dl>
-            </button>
+            </section>
           </div>
           <div class="instrument-copy">
             <span class="eyebrow">{selected.releaseDate ?? 'Undated'}{selected.label ? ` · ${selected.label}` : ''}</span>
@@ -563,19 +569,25 @@
       <div class="instrument-empty">Commit an asset in Inspect, then return here to play it.</div>
     {/if}
 
-    <button class="view-arrow previous" onclick={() => selectView(-1)} aria-label="Previous visualization">←</button>
-    <button class="view-arrow next" onclick={() => selectView(1)} aria-label="Next visualization">→</button>
-    {#if selected && viewIndex === 0}
-      <button class="track-edge previous-track" onclick={() => navigateTrack(-1)} disabled={selectedTrackIndex <= 0} aria-label="Previous track"></button>
-      <button class="track-edge next-track" onclick={() => navigateTrack(1)} disabled={selectedTrackIndex < 0 || selectedTrackIndex >= selectedAlbumItems.length - 1} aria-label="Next track"></button>
-    {/if}
+    <button class="side-navigation visualization previous" onclick={() => selectView(-1)} aria-label="Previous visualization" title="Previous visualization">
+      <svg viewBox="0 0 32 32" aria-hidden="true"><path d="M25 16H7m0 0 7-7m-7 7 7 7" /></svg>
+    </button>
+    <button class="side-navigation visualization next" onclick={() => selectView(1)} aria-label="Next visualization" title="Next visualization">
+      <svg viewBox="0 0 32 32" aria-hidden="true"><path d="M7 16h18m0 0-7-7m7 7-7 7" /></svg>
+    </button>
     {#if selected}
-      <nav class="context-navigation" aria-label="Album and track navigation">
-        <button onclick={() => navigateAlbum(-1)} disabled={selectedAlbumIndex <= 0} title="Previous album" aria-label="Previous album">‹ ALB</button>
-        <button onclick={() => navigateTrack(-1)} disabled={selectedTrackIndex <= 0} title="Previous track" aria-label="Previous track">‹ TRK</button>
-        <button onclick={() => navigateTrack(1)} disabled={selectedTrackIndex < 0 || selectedTrackIndex >= selectedAlbumItems.length - 1} title="Next track" aria-label="Next track">TRK ›</button>
-        <button onclick={() => navigateAlbum(1)} disabled={selectedAlbumIndex < 0 || selectedAlbumIndex >= navigationAlbums.length - 1} title="Next album" aria-label="Next album">ALB ›</button>
-      </nav>
+      <button class="side-navigation album previous" onclick={() => navigateAlbum(-1)} disabled={selectedAlbumIndex <= 0} title="Previous album" aria-label="Previous album">
+        <svg viewBox="0 0 32 32" aria-hidden="true"><path d="M9 7v18M24 8l-8 8 8 8" /></svg>
+      </button>
+      <button class="side-navigation album next" onclick={() => navigateAlbum(1)} disabled={selectedAlbumIndex < 0 || selectedAlbumIndex >= navigationAlbums.length - 1} title="Next album" aria-label="Next album">
+        <svg viewBox="0 0 32 32" aria-hidden="true"><path d="M23 7v18M8 8l8 8-8 8" /></svg>
+      </button>
+      <button class="side-navigation track previous" onclick={() => navigateTrack(-1)} disabled={selectedTrackIndex <= 0} title="Previous track" aria-label="Previous track">
+        <svg viewBox="0 0 32 32" aria-hidden="true"><path d="m20 7-9 9 9 9" /></svg>
+      </button>
+      <button class="side-navigation track next" onclick={() => navigateTrack(1)} disabled={selectedTrackIndex < 0 || selectedTrackIndex >= selectedAlbumItems.length - 1} title="Next track" aria-label="Next track">
+        <svg viewBox="0 0 32 32" aria-hidden="true"><path d="m12 7 9 9-9 9" /></svg>
+      </button>
     {/if}
     {#if $currentPlayback}
       <button 
@@ -695,6 +707,4 @@
   .catalog-items article{position:relative;overflow:hidden;touch-action:pan-y}.catalog-primary{position:relative;z-index:1;padding-right:68px;transition:transform .16s ease;background:var(--surface)}.actions-open .catalog-primary{transform:translateX(92px)}
   .item-actions{position:absolute;inset:0 auto 0 0;width:92px;display:grid;grid-template-columns:1fr 1fr;background:var(--signal)}.item-actions button{border:0;border-right:1px solid #1c2117;background:transparent;color:#10110f;font-size:20px}
   .catalog-edit{position:absolute;z-index:2;top:50%;right:12px;width:38px;height:38px;padding:0;transform:translateY(-50%);border:0;background:transparent;color:var(--muted);font-size:17px}.catalog-edit:hover,.catalog-edit:focus-visible{color:var(--signal)}.actions-open .catalog-edit{pointer-events:none;opacity:0}
-  .context-navigation{position:absolute;z-index:14;bottom:122px;left:24px;display:flex;gap:2px}.context-navigation button{height:34px;min-width:52px;padding:0 8px;border:0;background:#101110cc;color:var(--muted);font:8px ui-monospace,monospace;letter-spacing:.08em}.context-navigation button:not(:disabled):hover,.context-navigation button:not(:disabled):focus-visible{color:var(--signal)}
-  @media(max-width:600px){.context-navigation{bottom:130px;left:10px}.context-navigation button{min-width:48px;padding:0 6px}}
 </style>
