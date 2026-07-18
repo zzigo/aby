@@ -28,7 +28,6 @@
   let conversionCodec = $state<'libvorbis' | 'libopus'>('libvorbis');
   let conversionQuality = $state(6);
   let setupMessage = $state('');
-  let requiresPromotion = $derived(Boolean(preview?.candidateMetadata.canonicalObjectKey && preview.candidateMetadata.canonicalObjectKey !== preview.objectKey));
 
   onMount(async () => {
     const userId = data.user?.id ?? 'anonymous';
@@ -202,9 +201,10 @@
     }
   }
 
-  async function commitCandidate() {
+  async function addToCatalog() {
     if (!preview) return;
     busy = true;
+    status = 'Copying, verifying and adding to the catalog…';
     try {
       const result = await request('/api/ingest/commit', {
         previewId: preview.id,
@@ -218,25 +218,13 @@
         catalogNumber,
         ...(trackEdits.length > 1 ? { tracks: trackEdits } : {})
       });
+      if (result.preview) preview = result.preview;
       asset = result.asset;
-      status = 'Work, recording and asset committed explicitly.';
+      status = result.sourceRetirement
+        ? 'Added to catalog. Canonical copy verified; the legacy source is marked as a future deletion candidate.'
+        : 'Added to catalog.';
     } catch (error) {
       status = error instanceof Error ? error.message : 'Commit failed';
-    } finally {
-      busy = false;
-    }
-  }
-
-  async function promoteCandidate() {
-    if (!preview) return;
-    busy = true;
-    status = 'Copying one object to Aby and verifying its SHA-256…';
-    try {
-      const result = await request('/api/ingest/promote', { previewId: preview.id });
-      applyPreview(result.preview, trackEdits);
-      status = `Canonical copy verified. ${result.sourceRetirement.objectKey} is now a deletion candidate; the source remains intact.`;
-    } catch (error) {
-      status = error instanceof Error ? error.message : 'Promotion failed';
     } finally {
       busy = false;
     }
@@ -383,11 +371,7 @@
           </div>
         {/if}
 
-        {#if requiresPromotion}
-          <button class="primary" onclick={promoteCandidate} disabled={busy || Boolean(asset)}>Promote to Aby</button>
-        {:else}
-          <button class="primary" onclick={commitCandidate} disabled={busy || Boolean(asset)}>Commit canonical metadata</button>
-        {/if}
+        <button class="primary" onclick={addToCatalog} disabled={busy || Boolean(asset)}>Add to catalog</button>
       {:else}
         <p>Candidate metadata will appear here. It remains editable until explicit commit.</p>
       {/if}

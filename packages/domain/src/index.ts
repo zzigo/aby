@@ -50,6 +50,7 @@ export const CandidateMetadataSchema = z.object({
   trackNumber: z.number().int().positive().optional(),
   recordingFolder: z.string().min(1).optional(),
   creator: z.string().optional(),
+  albumArtist: z.string().optional(),
   date: z.string().optional(),
   releaseDate: z.string().optional(),
   label: z.string().optional(),
@@ -90,9 +91,50 @@ export const CandidateMetadataSchema = z.object({
     label: z.string().optional(),
     catalogNumber: z.string().optional(),
     coverUrl: z.string().url().optional(),
-    canonicalUrl: z.string().url()
+    canonicalUrl: z.string().url(),
+    releaseDate: z.string().optional(),
+    country: z.string().optional(),
+    labels: z.array(z.object({
+      name: z.string().min(1),
+      catalogNumber: z.string().optional(),
+      externalId: z.string().optional(),
+      entityType: z.string().optional()
+    })).optional(),
+    companies: z.array(z.object({
+      name: z.string().min(1),
+      role: z.string().optional(),
+      catalogNumber: z.string().optional(),
+      externalId: z.string().optional()
+    })).optional(),
+    credits: z.array(z.object({
+      name: z.string().min(1),
+      role: z.string().min(1),
+      tracks: z.string().optional(),
+      externalId: z.string().optional()
+    })).optional(),
+    genres: z.array(z.string()).optional(),
+    styles: z.array(z.string()).optional(),
+    formats: z.array(z.object({
+      name: z.string().min(1),
+      quantity: z.string().optional(),
+      descriptions: z.array(z.string()).optional()
+    })).optional(),
+    tracklist: z.array(z.object({
+      position: z.string().optional(),
+      title: z.string().min(1),
+      duration: z.string().optional(),
+      type: z.string().optional()
+    })).optional(),
+    dataQuality: z.string().optional()
   }).optional(),
   discogsRefreshedAt: z.string().datetime().optional(),
+  metadataSources: z.array(z.object({
+    authority: z.string().min(1),
+    externalId: z.string().min(1),
+    canonicalUrl: z.string().url(),
+    fetchedAt: z.string().datetime(),
+    reviewState: ReviewStateSchema
+  })).optional(),
   derivatives: z.array(z.object({
     kind: z.string(),
     objectKey: z.string(),
@@ -216,6 +258,7 @@ export const CatalogItemSchema = z.object({
   albumTitle: z.string().optional(),
   trackNumber: z.number().int().positive().optional(),
   creator: z.string().optional(),
+  albumArtist: z.string().optional(),
   coverUrl: z.string().min(1).optional(),
   releaseDate: z.string().optional(),
   label: z.string().optional(),
@@ -246,6 +289,8 @@ export type TrackEdit = z.infer<typeof TrackEditSchema>;
 
 export const AlbumEditSchema = z.object({
   title: z.string().trim().min(1).max(500),
+  albumArtist: z.string().trim().max(500).nullable().optional(),
+  // Backward-compatible input for the first album editor implementation.
   creator: z.string().trim().max(500).nullable().optional(),
   releaseDate: z.string().trim().max(500).nullable().optional(),
   label: z.string().trim().max(500).nullable().optional(),

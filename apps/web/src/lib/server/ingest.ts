@@ -99,7 +99,19 @@ export async function inspectWasabiSource(
       }
     }
 
+    const embeddedTags = mainInspected.metadata.tags;
+    const embeddedTag = (...names: string[]) => {
+      const wanted = new Set(names.map((name) => name.toLowerCase()));
+      const entry = Object.entries(embeddedTags).find(([name]) => wanted.has(name.toLowerCase()));
+      return entry?.[1]?.trim() || undefined;
+    };
+    const embeddedAlbumTitle = embeddedTag('album');
+    const embeddedArtist = embeddedTag('album_artist', 'albumartist', 'artist');
+    const embeddedReleaseDate = embeddedTag('date', 'year');
     const creator = identification?.artistName || input.creatorDisplay;
+    const albumArtist = identification?.artistName
+      || (embeddedArtist && !embeddedArtist.includes('\uFFFD') ? embeddedArtist : undefined)
+      || creator;
     const workTitle = input.workTitle;
     const entitySlug = identification?.artistName
       ? identification.artistName.normalize('NFKD')
@@ -112,16 +124,18 @@ export async function inspectWasabiSource(
     const parsedMainTrack = parseTrackFilename(basename(sourceObjectKey));
     const requestedTrack = input.recordingTitle ? parseTrackFilename(`${input.recordingTitle}${extname(sourceObjectKey)}`) : null;
     const recordingTitle = identification?.recordingTitle || requestedTrack?.title || parsedMainTrack.title || input.workTitle;
-    const albumTitle = identification?.releaseTitle || (siblingKeys.length > 1 ? basename(dirname(sourceObjectKey)) : undefined);
-    const alternativeCover = !identification?.cover && creator && albumTitle
-      ? await findAlbumArtwork({ creator, albumTitle }).catch((error: unknown) => {
+    const albumTitle = identification?.releaseTitle || embeddedAlbumTitle
+      || (siblingKeys.length > 1 ? basename(dirname(sourceObjectKey)) : undefined);
+    const releaseDate = identification?.releaseDate || embeddedReleaseDate;
+    const alternativeCover = !identification?.cover && albumArtist && albumTitle
+      ? await findAlbumArtwork({ creator: albumArtist, albumTitle }).catch((error: unknown) => {
           console.warn('[CoverArt] Release-group fallback unavailable:', error instanceof Error ? error.message : 'unknown error');
           return null;
         })
       : null;
     const cover = identification?.cover ?? alternativeCover;
     const recordingFolder = recordingFolderName({
-      ...(identification?.releaseDate ? { releaseDate: identification.releaseDate } : {}),
+      ...(releaseDate ? { releaseDate } : {}),
       ...(identification?.label ? { label: identification.label } : {}),
       fallback: albumTitle || recordingTitle
     });
@@ -236,7 +250,8 @@ export async function inspectWasabiSource(
         ...(parsedMainTrack.trackNumber !== undefined ? { trackNumber: parsedMainTrack.trackNumber } : {}),
         recordingFolder,
         creator,
-        ...(identification?.releaseDate ? { releaseDate: identification.releaseDate } : {}),
+        albumArtist,
+        ...(releaseDate ? { releaseDate } : {}),
         ...(identification?.label ? { label: identification.label } : {}),
         ...(identification?.catalogNumber ? { catalogNumber: identification.catalogNumber } : {}),
         entitySlug,

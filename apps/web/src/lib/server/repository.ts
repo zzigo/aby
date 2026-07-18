@@ -46,6 +46,7 @@ export interface AbyRepository {
   getCatalogItem(ownerId: string, assetId: string): Promise<CatalogItem | null>;
   updateCatalogItem(ownerId: string, assetId: string, input: TrackEdit): Promise<CatalogItem>;
   updateAlbum(ownerId: string, albumId: string, input: AlbumEdit): Promise<CatalogItem[]>;
+  applyAlbumMetadata(ownerId: string, albumId: string, input: AlbumEdit, metadata: Record<string, unknown>): Promise<CatalogItem[]>;
   mergeAlbumMetadata(ownerId: string, albumId: string, metadata: Record<string, unknown>): Promise<CatalogItem[]>;
   softDeleteAsset(ownerId: string, assetId: string): Promise<void>;
   getConversionSettings(ownerId: string): Promise<ConversionSettings>;
@@ -157,6 +158,7 @@ export class MemoryAbyRepository implements AbyRepository {
     }];
 
     const finalCreator = creator !== undefined ? creator : preview.candidateMetadata.creator;
+    const finalAlbumArtist = preview.candidateMetadata.albumArtist ?? finalCreator;
     const finalDate = date !== undefined ? date : preview.candidateMetadata.date;
     const finalReleaseDate = releaseDate !== undefined ? releaseDate : preview.candidateMetadata.releaseDate;
     const finalLabel = label !== undefined ? label : preview.candidateMetadata.label;
@@ -189,6 +191,7 @@ export class MemoryAbyRepository implements AbyRepository {
           ...(albumTitle || preview.candidateMetadata.albumTitle ? { albumTitle: albumTitle || preview.candidateMetadata.albumTitle } : {}),
           ...(finalTrackNumber !== undefined ? { trackNumber: finalTrackNumber } : {}),
           creator: finalCreator,
+          albumArtist: finalAlbumArtist,
           date: finalDate,
           releaseDate: finalReleaseDate,
           label: finalLabel,
@@ -239,6 +242,7 @@ export class MemoryAbyRepository implements AbyRepository {
         ...(asset.canonicalMetadata.albumTitle ? { albumTitle: asset.canonicalMetadata.albumTitle } : {}),
         ...(asset.canonicalMetadata.trackNumber ? { trackNumber: asset.canonicalMetadata.trackNumber } : {}),
         ...(asset.canonicalMetadata.creator ? { creator: asset.canonicalMetadata.creator } : {}),
+        ...(asset.canonicalMetadata.albumArtist ? { albumArtist: asset.canonicalMetadata.albumArtist } : {}),
         ...(asset.canonicalMetadata.imageCandidates?.[0]?.url ? { coverUrl: asset.canonicalMetadata.imageCandidates[0].url } : {}),
         ...(asset.canonicalMetadata.releaseDate ? { releaseDate: asset.canonicalMetadata.releaseDate } : {}),
         ...(asset.canonicalMetadata.label ? { label: asset.canonicalMetadata.label } : {}),
@@ -282,16 +286,22 @@ export class MemoryAbyRepository implements AbyRepository {
     const assets = [...this.#assets.values()].filter((asset) => asset.ownerId === ownerId && asset.albumId === albumId);
     if (!assets.length) throw new AbyError('album_not_found', 'Album not found', 404);
     for (const asset of assets) {
+      const albumArtist = input.albumArtist ?? input.creator;
       asset.canonicalMetadata = {
         ...asset.canonicalMetadata,
         albumTitle: input.title,
-        ...(input.creator ? { creator: input.creator } : { creator: undefined }),
+        ...(albumArtist ? { albumArtist } : { albumArtist: undefined }),
         ...(input.releaseDate ? { releaseDate: input.releaseDate } : { releaseDate: undefined }),
         ...(input.label ? { label: input.label } : { label: undefined }),
         ...(input.catalogNumber ? { catalogNumber: input.catalogNumber } : { catalogNumber: undefined })
       };
     }
     return (await this.listCatalog(ownerId)).filter((item) => item.albumId === albumId);
+  }
+
+  async applyAlbumMetadata(ownerId: string, albumId: string, input: AlbumEdit, metadata: Record<string, unknown>): Promise<CatalogItem[]> {
+    await this.updateAlbum(ownerId, albumId, input);
+    return this.mergeAlbumMetadata(ownerId, albumId, metadata);
   }
 
   async mergeAlbumMetadata(ownerId: string, albumId: string, metadata: Record<string, unknown>): Promise<CatalogItem[]> {
@@ -501,6 +511,7 @@ export class PostgresAbyRepository implements AbyRepository {
       }];
 
       const finalCreator = creator !== undefined ? creator : preview.candidate_metadata.creator;
+      const finalAlbumArtist = preview.candidate_metadata.albumArtist ?? finalCreator;
       const finalDate = date !== undefined ? date : preview.candidate_metadata.date;
       const finalReleaseDate = releaseDate !== undefined ? releaseDate : preview.candidate_metadata.releaseDate;
       const finalLabel = label !== undefined ? label : preview.candidate_metadata.label;
@@ -525,6 +536,7 @@ export class PostgresAbyRepository implements AbyRepository {
         await client.query(
           'INSERT INTO aby.albums(id,owner_id,work_id,title,metadata,provenance) VALUES($1,$2,$3,$4,$5,$6)',
           [albumId, ownerId, workId, finalAlbumTitle, {
+            albumArtist: finalAlbumArtist,
             releaseDate: finalReleaseDate,
             label: finalLabel,
             catalogNumber: finalCatalogNumber,
@@ -587,6 +599,7 @@ export class PostgresAbyRepository implements AbyRepository {
           albumTitle: finalAlbumTitle,
           trackNumber: finalTrackNumber,
           creator: finalCreator,
+          albumArtist: finalAlbumArtist,
           date: finalDate,
           releaseDate: finalReleaseDate,
           label: finalLabel,
@@ -764,6 +777,7 @@ export class PostgresAbyRepository implements AbyRepository {
         ...(row.album_title ? { albumTitle: row.album_title } : {}),
         ...(row.recording_metadata?.trackNumber ? { trackNumber: Number(row.recording_metadata.trackNumber) } : {}),
         ...(asset.canonicalMetadata.creator ? { creator: asset.canonicalMetadata.creator } : {}),
+        ...(asset.canonicalMetadata.albumArtist ? { albumArtist: asset.canonicalMetadata.albumArtist } : {}),
         ...(imageCandidate?.url ? { coverUrl: imageCandidate.url } : {}),
         ...(asset.canonicalMetadata.releaseDate ? { releaseDate: asset.canonicalMetadata.releaseDate } : {}),
         ...(asset.canonicalMetadata.label ? { label: asset.canonicalMetadata.label } : {}),
@@ -858,8 +872,9 @@ export class PostgresAbyRepository implements AbyRepository {
         'SELECT id FROM aby.albums WHERE id=$1 AND owner_id=$2 FOR UPDATE', [albumId, ownerId]
       );
       if (!album.rows[0]) throw new AbyError('album_not_found', 'Album not found', 404);
+      const albumArtist = input.albumArtist ?? input.creator ?? null;
       const albumMetadata = {
-        creator: input.creator ?? null,
+        albumArtist,
         releaseDate: input.releaseDate ?? null,
         label: input.label ?? null,
         catalogNumber: input.catalogNumber ?? null
@@ -878,6 +893,47 @@ export class PostgresAbyRepository implements AbyRepository {
         `UPDATE aby.assets a SET canonical_metadata=jsonb_strip_nulls(a.canonical_metadata || $1::jsonb),updated_at=now()
          FROM aby.recordings r WHERE a.recording_id=r.id AND r.album_id=$2 AND a.owner_id=$3`,
         [canonicalMetadata, albumId, ownerId]
+      );
+      await client.query('COMMIT');
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+    return (await this.listCatalog(ownerId)).filter((item) => item.albumId === albumId);
+  }
+
+  async applyAlbumMetadata(ownerId: string, albumId: string, input: AlbumEdit, metadata: Record<string, unknown>): Promise<CatalogItem[]> {
+    const client = await this.#pool.connect();
+    try {
+      await client.query('BEGIN');
+      const albumArtist = input.albumArtist ?? input.creator ?? null;
+      const albumMetadata = {
+        albumArtist,
+        releaseDate: input.releaseDate ?? null,
+        label: input.label ?? null,
+        catalogNumber: input.catalogNumber ?? null
+      };
+      const canonicalMetadata = { albumTitle: input.title, ...albumMetadata };
+      const album = await client.query(
+        `UPDATE aby.albums
+         SET title=$1,metadata=jsonb_strip_nulls((metadata || $2::jsonb) || $3::jsonb),updated_at=now()
+         WHERE id=$4 AND owner_id=$5 RETURNING id`,
+        [input.title, albumMetadata, metadata, albumId, ownerId]
+      );
+      if (!album.rows[0]) throw new AbyError('album_not_found', 'Album not found', 404);
+      await client.query(
+        `UPDATE aby.recordings SET metadata=jsonb_strip_nulls(metadata || $1::jsonb),updated_at=now()
+         WHERE album_id=$2 AND owner_id=$3`,
+        [{ releaseDate: albumMetadata.releaseDate, label: albumMetadata.label, catalogNumber: albumMetadata.catalogNumber }, albumId, ownerId]
+      );
+      await client.query(
+        `UPDATE aby.assets a
+         SET canonical_metadata=jsonb_strip_nulls((a.canonical_metadata || $1::jsonb) || $2::jsonb),updated_at=now()
+         FROM aby.recordings r
+         WHERE a.recording_id=r.id AND r.album_id=$3 AND a.owner_id=$4`,
+        [canonicalMetadata, metadata, albumId, ownerId]
       );
       await client.query('COMMIT');
     } catch (error) {

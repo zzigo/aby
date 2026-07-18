@@ -113,11 +113,10 @@ describe('preview-before-write repository flow', () => {
     const initial = await repository.listCatalog('owner-a');
     const albumId = initial[0]!.albumId!;
 
-    await repository.updateAlbum('owner-a', albumId, {
-      title: 'Sind', creator: 'Axel Dörner', releaseDate: '2007',
+    const updated = await repository.applyAlbumMetadata('owner-a', albumId, {
+      title: 'Sind', albumArtist: 'Axel Dörner', releaseDate: '2007',
       label: 'absinthRecords', catalogNumber: 'absinthRecords 010'
-    });
-    const updated = await repository.mergeAlbumMetadata('owner-a', albumId, {
+    }, {
       imageCandidates: [{
         authority: 'discogs', url: 'https://i.discogs.com/sind.jpeg', kind: 'cover',
         exactRelease: true, sourceId: '1229980', provenance: {}
@@ -128,7 +127,8 @@ describe('preview-before-write repository flow', () => {
     expect(updated.map((item) => item.recordingTitle)).toEqual(['One', 'Two']);
     for (const item of updated) {
       expect(item.albumTitle).toBe('Sind');
-      expect(item.creator).toBe('Axel Dörner');
+      expect(item.albumArtist).toBe('Axel Dörner');
+      expect(item.creator).toBe('Artist');
       expect(item.label).toBe('absinthRecords');
       expect(item.coverUrl).toBe('https://i.discogs.com/sind.jpeg');
     }

@@ -1,5 +1,6 @@
-import { api, AbyError, ownerFor } from '$lib/server/errors';
-import { searchDiscogsRelease } from '$lib/server/discogs';
+import { z } from 'zod';
+import { api, AbyError, jsonBody, ownerFor } from '$lib/server/errors';
+import { getDiscogsRelease, searchDiscogsRelease } from '$lib/server/discogs';
 import { getRepository } from '$lib/server/repository';
 import type { RequestHandler } from './$types';
 
@@ -9,25 +10,52 @@ export const POST: RequestHandler = (event) => api('album.metadata.discogs', asy
   const items = (await repository.listCatalog(ownerId)).filter((item) => item.albumId === event.params.id);
   const first = items[0];
   if (!first) throw new AbyError('album_not_found', 'Album not found', 404);
-  const creator = first.creator?.trim();
+  const input = z.object({
+    creator: z.string().trim().max(500).optional(),
+    albumTitle: z.string().trim().max(500).optional(),
+    year: z.string().trim().max(50).optional()
+  }).parse(await jsonBody(event));
+  const creator = input.creator || first.albumArtist?.trim() || first.creator?.trim();
   if (!creator) throw new AbyError('album_creator_missing', 'Add the album creator before searching Discogs', 400);
   const candidate = await searchDiscogsRelease({
     creator,
-    albumTitle: first.albumTitle || first.workTitle,
-    year: first.releaseDate
+    albumTitle: input.albumTitle || first.albumTitle || first.workTitle,
+    year: input.year || first.releaseDate
   });
   if (!candidate) throw new AbyError('discogs_release_not_found', 'No Discogs release matched this album', 404);
 
+  return { candidate };
+});
+
+export const PUT: RequestHandler = (event) => api('album.metadata.discogs.apply', async () => {
+  const ownerId = ownerFor(event);
+  const repository = getRepository();
+  const input = z.object({ releaseId: z.string().regex(/^\d+$/) }).parse(await jsonBody(event));
+  const candidate = await getDiscogsRelease(input.releaseId);
+  const items = (await repository.listCatalog(ownerId)).filter((item) => item.albumId === event.params.id);
+  const first = items[0];
+  if (!first) throw new AbyError('album_not_found', 'Album not found', 404);
   const prior = first.asset.canonicalMetadata.imageCandidates
     ?.filter((image) => image.authority !== 'discogs') ?? [];
   const imageCandidates = candidate.coverUrl ? [{
     authority: 'discogs', url: candidate.coverUrl, kind: 'cover' as const, exactRelease: true,
     sourceId: candidate.id, provenance: { canonicalUrl: candidate.canonicalUrl }
   }, ...prior] : prior;
-  const updated = await repository.mergeAlbumMetadata(ownerId, event.params.id, {
+  const fetchedAt = new Date().toISOString();
+  const updated = await repository.applyAlbumMetadata(ownerId, event.params.id, {
+    title: candidate.title,
+    albumArtist: candidate.creator,
+    releaseDate: candidate.releaseDate || candidate.year || null,
+    label: candidate.label || null,
+    catalogNumber: candidate.catalogNumber || null
+  }, {
     ...(imageCandidates.length ? { imageCandidates } : {}),
     discogs: candidate,
-    discogsRefreshedAt: new Date().toISOString()
+    discogsRefreshedAt: fetchedAt,
+    metadataSources: [{
+      authority: 'discogs', externalId: candidate.id, canonicalUrl: candidate.canonicalUrl,
+      fetchedAt, reviewState: 'accepted'
+    }]
   });
   return { items: updated, candidate };
 });
