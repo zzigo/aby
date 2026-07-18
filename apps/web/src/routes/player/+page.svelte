@@ -174,7 +174,7 @@
     if (!$playbackIsPlaying || index < 0 || !container) return;
     requestAnimationFrame(() => {
       const active = container.querySelector<HTMLElement>(`[data-lyric-index="${index}"]`);
-      if (active) container.scrollTo({ top: Math.max(0, active.offsetTop - container.clientHeight * .68), behavior: 'smooth' });
+      if (active) container.scrollTo({ top: Math.max(0, active.offsetTop - container.clientHeight * .75), behavior: 'smooth' });
     });
   });
 
