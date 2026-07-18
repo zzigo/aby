@@ -56,7 +56,9 @@ export const PUT: RequestHandler = (event) => api('album.metadata.discogs.apply'
     albumTags,
     genres: candidate.genres ?? [],
     styles: candidate.styles ?? [],
-    roles: (candidate.credits ?? []).map((credit) => ({ ...credit, authority: 'discogs' }))
+    roles: (candidate.credits ?? []).map((credit) => ({ ...credit, authority: 'discogs' })),
+    notes: candidate.notes ?? first.asset.canonicalMetadata.albumNotes ?? null,
+    collectionCode: first.asset.canonicalMetadata.collectionCode
   }, {
     ...(imageCandidates.length ? { imageCandidates } : {}),
     discogs: candidate,

@@ -65,6 +65,23 @@ export const CandidateMetadataSchema = z.object({
   genres: z.array(z.string().trim().min(1).max(100)).max(100).optional(),
   styles: z.array(z.string().trim().min(1).max(100)).max(100).optional(),
   roles: z.array(AlbumRoleSchema).max(250).optional(),
+  notes: z.string().trim().max(20_000).optional(),
+  albumNotes: z.string().trim().max(20_000).optional(),
+  waveform: z.object({
+    artifactObjectKey: z.string().min(1),
+    sourceChecksumSha256: z.string().regex(/^[a-f0-9]{64}$/),
+    width: z.number().int().positive(),
+    height: z.number().int().positive(),
+    generatedAt: z.string().datetime()
+  }).optional(),
+  storageRetirementCandidates: z.array(z.object({
+    sourceObjectKey: z.string().min(1),
+    targetObjectKey: z.string().min(1),
+    checksumSha256: z.string().regex(/^[a-f0-9]{64}$/),
+    state: z.enum(['candidate', 'retired']),
+    copiedAt: z.string().datetime(),
+    retiredAt: z.string().datetime().optional()
+  })).max(250).optional(),
   date: z.string().optional(),
   releaseDate: z.string().optional(),
   label: z.string().optional(),
@@ -140,6 +157,7 @@ export const CandidateMetadataSchema = z.object({
       type: z.string().optional()
     })).optional(),
     dataQuality: z.string().optional(),
+    notes: z.string().optional(),
     durationMs: z.number().int().nonnegative().optional()
   }).optional(),
   discogsRefreshedAt: z.string().datetime().optional(),
@@ -301,7 +319,8 @@ export const TrackEditSchema = z.object({
   releaseDate: z.string().trim().max(500).nullable().optional(),
   label: z.string().trim().max(500).nullable().optional(),
   catalogNumber: z.string().trim().max(500).nullable().optional(),
-  tags: z.array(z.string().trim().min(1).max(100)).max(50).optional()
+  tags: z.array(z.string().trim().min(1).max(100)).max(50).optional(),
+  notes: z.string().trim().max(20_000).nullable().optional()
 });
 export type TrackEdit = z.infer<typeof TrackEditSchema>;
 
@@ -317,7 +336,9 @@ export const AlbumEditSchema = z.object({
   albumTags: z.array(z.string().trim().min(1).max(100)).max(100).optional(),
   genres: z.array(z.string().trim().min(1).max(100)).max(100).optional(),
   styles: z.array(z.string().trim().min(1).max(100)).max(100).optional(),
-  roles: z.array(AlbumRoleSchema).max(250).optional()
+  roles: z.array(AlbumRoleSchema).max(250).optional(),
+  notes: z.string().trim().max(20_000).nullable().optional(),
+  collectionCode: z.string().trim().regex(/^[A-Za-z0-9]{1,8}$/).optional()
 });
 export type AlbumEdit = z.infer<typeof AlbumEditSchema>;
 

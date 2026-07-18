@@ -121,6 +121,24 @@ export async function copyWasabiSourceToCanonical(sourceObjectKey: string, targe
   return { created: true, sourceObjectKey: sourceKey, targetObjectKey: targetKey, head };
 }
 
+export async function copyWasabiCanonicalObject(sourceObjectKey: string, targetObjectKey: string) {
+  const config = readConfig();
+  const sourceKey = assertAbyObjectKey(sourceObjectKey, config.storagePrefix);
+  const targetKey = assertAbyObjectKey(targetObjectKey, config.storagePrefix);
+  const source = await headWasabiObject(sourceKey);
+  const existing = await canonicalHeadOrNull(targetKey);
+  if (existing) return { created: false, sourceObjectKey: sourceKey, targetObjectKey: targetKey, source, head: existing };
+  const bucket = config.WASABI_BUCKET!;
+  await wasabiClient().send(new CopyObjectCommand({
+    Bucket: bucket,
+    Key: toWasabiKey(targetKey, config.wasabiRootPrefix),
+    CopySource: encodeURIComponent(`${bucket}/${toWasabiKey(sourceKey, config.wasabiRootPrefix)}`),
+    MetadataDirective: 'COPY'
+  }));
+  const head = await headWasabiObject(targetKey);
+  return { created: true, sourceObjectKey: sourceKey, targetObjectKey: targetKey, source, head };
+}
+
 export async function deleteWasabiCanonicalObject(objectKey: string): Promise<void> {
   const config = readConfig();
   const key = assertAbyObjectKey(objectKey, config.storagePrefix);

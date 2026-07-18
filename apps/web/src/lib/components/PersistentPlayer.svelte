@@ -5,6 +5,7 @@
     advancePlayback,
     currentPlayback,
     currentPlaybackTimeMs,
+    playbackLoop,
     playbackMode,
     type PlaybackMode
   } from '$lib/player';
@@ -22,7 +23,10 @@
 
   function seekToSegmentStart() {
     if (!audio) return;
-    if ($currentPlayback?.startTimeMs !== undefined) {
+    const loop = $playbackLoop;
+    if (loop && loop.assetId === $currentPlayback?.assetId) {
+      audio.currentTime = loop.startTimeMs / 1000;
+    } else if ($currentPlayback?.startTimeMs !== undefined) {
       audio.currentTime = $currentPlayback.startTimeMs / 1000;
     } else {
       audio.currentTime = 0;
@@ -45,7 +49,19 @@
   }
 
   function enforceSegmentEnd() {
-    if (!audio || $currentPlayback?.endTimeMs === undefined) return;
+    if (!audio) return;
+    const loop = $playbackLoop;
+    if (loop && loop.assetId === $currentPlayback?.assetId) {
+      const endSeconds = loop.endTimeMs / 1000;
+      if (audio.currentTime >= endSeconds) {
+        audio.currentTime = loop.startTimeMs / 1000;
+        currentTimeMs = audio.currentTime * 1000;
+        currentPlaybackTimeMs.set(currentTimeMs);
+        void audio.play().catch(() => {});
+      }
+      return;
+    }
+    if ($currentPlayback?.endTimeMs === undefined) return;
     const endSeconds = $currentPlayback.endTimeMs / 1000;
     if (audio.currentTime >= endSeconds) {
       audio.pause();
@@ -73,6 +89,12 @@
 
   async function handleEnded() {
     if (!audio) return;
+    const loop = $playbackLoop;
+    if (loop && loop.assetId === $currentPlayback?.assetId) {
+      audio.currentTime = loop.startTimeMs / 1000;
+      await audio.play().catch(() => {});
+      return;
+    }
     if ($playbackMode === 'loop-track') {
       seekToSegmentStart();
       await audio.play().catch(() => {});

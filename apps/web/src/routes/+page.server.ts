@@ -1,5 +1,7 @@
-import { error } from '@sveltejs/kit';
-import type { Actions } from './$types';
+import { error, redirect } from '@sveltejs/kit';
+import type { Actions, PageServerLoad } from './$types';
+
+export const load: PageServerLoad = () => redirect(307, '/player');
 
 export const actions: Actions = {
   signIn: async ({ locals, url }) => {

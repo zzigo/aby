@@ -17,3 +17,10 @@ export function formatTechnicalFormat(metadata: TechnicalMetadata): string {
     .filter((value): value is string => Boolean(value));
   return [...new Set(values.map((value) => value.toLowerCase()))].join(' · ');
 }
+
+export function displayTrackTitle(title: string, trackNumber?: number): string {
+  const trimmed = title.trim();
+  const placeholder = trimmed.match(/^track(?:\s+(\d{1,3}))?$/i);
+  if (!placeholder) return trimmed;
+  return String(trackNumber ?? (placeholder[1] ? Number(placeholder[1]) : '—'));
+}

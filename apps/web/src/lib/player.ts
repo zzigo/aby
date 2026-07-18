@@ -16,9 +16,16 @@ export interface PlaybackItem extends PlaybackContextItem {
   endTimeMs?: number;
 }
 
+export interface PlaybackLoop {
+  assetId: string;
+  startTimeMs: number;
+  endTimeMs: number;
+}
+
 export const currentPlayback = writable<PlaybackItem | null>(null);
 export const currentPlaybackTimeMs = writable<number>(0);
 export const playbackMode = writable<PlaybackMode>('continuous');
+export const playbackLoop = writable<PlaybackLoop | null>(null);
 const playbackCatalog = writable<PlaybackContextItem[]>([]);
 
 function trackOrder(left: PlaybackContextItem, right: PlaybackContextItem) {
@@ -62,6 +69,21 @@ export async function advancePlayback(): Promise<boolean> {
   if (!current) return false;
   const next = nextPlaybackItem(get(playbackCatalog), current, get(playbackMode));
   if (!next) return false;
+  await loadContextPlayback(next);
+  return true;
+}
+
+export async function stepPlayback(direction: -1 | 1): Promise<boolean> {
+  const current = get(currentPlayback);
+  if (!current) return false;
+  const catalog = get(playbackCatalog);
+  const ordered = current.albumId
+    ? catalog.filter((item) => item.albumId === current.albumId).sort(trackOrder)
+    : catalog;
+  const index = ordered.findIndex((item) => item.assetId === current.assetId);
+  const next = index >= 0 ? ordered[index + direction] : undefined;
+  if (!next) return false;
+  playbackLoop.set(null);
   await loadContextPlayback(next);
   return true;
 }

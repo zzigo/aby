@@ -31,6 +31,7 @@ interface DiscogsReleaseDocument {
   tracklist?: Array<{ position?: string; title?: string; duration?: string; type_?: string }>;
   images?: Array<{ type?: string; uri?: string; uri150?: string }>;
   data_quality?: string;
+  notes?: string;
 }
 
 export interface DiscogsReleaseCandidate {
@@ -53,6 +54,7 @@ export interface DiscogsReleaseCandidate {
   tracklist?: Array<{ position?: string; title: string; duration?: string; type?: string }>;
   dataQuality?: string;
   durationMs?: number;
+  notes?: string;
 }
 
 interface DiscogsOptions {
@@ -156,6 +158,7 @@ function releaseCandidate(
     ...(tracklist.length ? { tracklist } : {}),
     ...(durationMs !== undefined ? { durationMs } : {}),
     ...(release.data_quality ? { dataQuality: release.data_quality } : {}),
+    ...(release.notes?.trim() ? { notes: release.notes.trim() } : {}),
     canonicalUrl: releasePath
       ? /^https?:\/\//i.test(releasePath) ? releasePath : new URL(releasePath, 'https://www.discogs.com').toString()
       : `https://www.discogs.com/release/${release.id}`

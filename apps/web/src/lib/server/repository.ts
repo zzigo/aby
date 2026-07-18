@@ -52,6 +52,8 @@ export interface AbyRepository {
   getConversionSettings(ownerId: string): Promise<ConversionSettings>;
   saveConversionSettings(ownerId: string, settings: ConversionSettings): Promise<ConversionSettings>;
   mergeCanonicalMetadata(ownerId: string, assetId: string, metadata: Record<string, unknown>): Promise<CatalogItem>;
+  relocateAsset(ownerId: string, assetId: string, sourceObjectKey: string, targetObjectKey: string, collectionCode: string): Promise<CatalogItem>;
+  objectKeyInUse(objectKey: string): Promise<boolean>;
   getAsset(ownerId: string, assetId: string): Promise<Asset | null>;
   getSpectrogramAnalysis(ownerId: string, assetId: string): Promise<SpectrogramAnalysis | null>;
   saveSpectrogramAnalysis(ownerId: string, asset: Asset, input: Omit<SpectrogramAnalysis, 'id' | 'assetId' | 'sourceAssetChecksum' | 'createdAt'>): Promise<SpectrogramAnalysis>;
@@ -72,7 +74,9 @@ function albumReleaseFields(input: AlbumEdit, albumArtist: string | null | undef
     ...(input.albumTags !== undefined ? { albumTags: input.albumTags } : {}),
     ...(input.genres !== undefined ? { genres: input.genres } : {}),
     ...(input.styles !== undefined ? { styles: input.styles } : {}),
-    ...(input.roles !== undefined ? { roles: input.roles } : {})
+    ...(input.roles !== undefined ? { roles: input.roles } : {}),
+    ...(input.notes !== undefined ? { albumNotes: input.notes } : {}),
+    ...(input.collectionCode !== undefined ? { collectionCode: input.collectionCode.toUpperCase() } : {})
   };
 }
 
@@ -291,8 +295,16 @@ export class MemoryAbyRepository implements AbyRepository {
       ...(input.releaseDate ? { releaseDate: input.releaseDate } : { releaseDate: undefined }),
       ...(input.label ? { label: input.label } : { label: undefined }),
       ...(input.catalogNumber ? { catalogNumber: input.catalogNumber } : { catalogNumber: undefined }),
-      tags: input.tags ?? asset.canonicalMetadata.tags
+      tags: input.tags ?? asset.canonicalMetadata.tags,
+      ...(input.notes ? { notes: input.notes } : { notes: undefined })
     };
+    if (asset.albumId && input.albumTitle) {
+      for (const albumAsset of this.#assets.values()) {
+        if (albumAsset.ownerId === ownerId && albumAsset.albumId === asset.albumId) {
+          albumAsset.canonicalMetadata = { ...albumAsset.canonicalMetadata, albumTitle: input.albumTitle };
+        }
+      }
+    }
     return (await this.getCatalogItem(ownerId, assetId))!;
   }
 
@@ -310,7 +322,9 @@ export class MemoryAbyRepository implements AbyRepository {
         releaseDate: releaseFields.releaseDate ?? undefined,
         label: releaseFields.label ?? undefined,
         catalogNumber: releaseFields.catalogNumber ?? undefined,
-        albumDurationMs: releaseFields.albumDurationMs ?? undefined
+        albumDurationMs: releaseFields.albumDurationMs ?? undefined,
+        albumNotes: releaseFields.albumNotes ?? undefined,
+        collectionCode: releaseFields.collectionCode ?? asset.canonicalMetadata.collectionCode
       };
     }
     return (await this.listCatalog(ownerId)).filter((item) => item.albumId === albumId);
@@ -348,6 +362,24 @@ export class MemoryAbyRepository implements AbyRepository {
     if (!asset || asset.ownerId !== ownerId) throw new AbyError('asset_not_found', 'Asset not found', 404);
     asset.canonicalMetadata = { ...asset.canonicalMetadata, ...metadata };
     return (await this.getCatalogItem(ownerId, assetId))!;
+  }
+
+  async relocateAsset(ownerId: string, assetId: string, sourceObjectKey: string, targetObjectKey: string, collectionCode: string): Promise<CatalogItem> {
+    const asset = this.#assets.get(assetId);
+    if (!asset || asset.ownerId !== ownerId || asset.objectKey !== sourceObjectKey) throw new AbyError('asset_relocation_conflict', 'Asset changed before relocation could be committed', 409);
+    const candidates = asset.canonicalMetadata.storageRetirementCandidates ?? [];
+    asset.objectKey = targetObjectKey;
+    asset.canonicalMetadata = {
+      ...asset.canonicalMetadata,
+      collectionCode,
+      canonicalObjectKey: targetObjectKey,
+      storageRetirementCandidates: [{ sourceObjectKey, targetObjectKey, checksumSha256: asset.checksumSha256, state: 'candidate', copiedAt: new Date().toISOString() }, ...candidates]
+    };
+    return (await this.getCatalogItem(ownerId, assetId))!;
+  }
+
+  async objectKeyInUse(objectKey: string): Promise<boolean> {
+    return [...this.#assets.values()].some((asset) => asset.objectKey === objectKey);
   }
 
   async createSegment(ownerId: string, input: SegmentCreate, provenance: Provenance): Promise<Segment> {
@@ -788,11 +820,11 @@ export class PostgresAbyRepository implements AbyRepository {
       const imageCandidate = asset.canonicalMetadata.imageCandidates?.[0];
       return {
         asset,
-        workTitle: row.work_title,
-        recordingTitle: row.recording_title,
+        workTitle: asset.canonicalMetadata.title || row.work_title,
+        recordingTitle: asset.canonicalMetadata.recordingTitle || row.recording_title,
         ...(row.album_id ? { albumId: row.album_id } : {}),
-        ...(row.album_title ? { albumTitle: row.album_title } : {}),
-        ...(row.recording_metadata?.trackNumber ? { trackNumber: Number(row.recording_metadata.trackNumber) } : {}),
+        ...(asset.canonicalMetadata.albumTitle || row.album_title ? { albumTitle: asset.canonicalMetadata.albumTitle || row.album_title } : {}),
+        ...(asset.canonicalMetadata.trackNumber || row.recording_metadata?.trackNumber ? { trackNumber: Number(asset.canonicalMetadata.trackNumber || row.recording_metadata.trackNumber) } : {}),
         ...(asset.canonicalMetadata.creator ? { creator: asset.canonicalMetadata.creator } : {}),
         ...(asset.canonicalMetadata.albumArtist ? { albumArtist: asset.canonicalMetadata.albumArtist } : {}),
         ...(imageCandidate?.url ? { coverUrl: imageCandidate.url } : {}),
@@ -864,13 +896,21 @@ export class PostgresAbyRepository implements AbyRepository {
         releaseDate: input.releaseDate ?? undefined,
         label: input.label ?? undefined,
         catalogNumber: input.catalogNumber ?? undefined,
-        tags: input.tags ?? row.canonical_metadata.tags
+        tags: input.tags ?? row.canonical_metadata.tags,
+        notes: input.notes ?? undefined
       };
       await client.query(
         'UPDATE aby.recordings SET album_id=$1,title=$2,metadata=$3,updated_at=now() WHERE id=$4 AND owner_id=$5',
         [albumId, parsedTrack.title, recordingMetadata, row.recording_id, ownerId]
       );
       await client.query('UPDATE aby.assets SET canonical_metadata=$1,updated_at=now() WHERE id=$2 AND owner_id=$3', [canonicalMetadata, assetId, ownerId]);
+      if (albumId && albumTitle) {
+        await client.query(
+          `UPDATE aby.assets a SET canonical_metadata=jsonb_set(a.canonical_metadata,'{albumTitle}',to_jsonb($1::text),true),updated_at=now()
+           FROM aby.recordings r WHERE a.recording_id=r.id AND r.album_id=$2 AND a.owner_id=$3`,
+          [albumTitle, albumId, ownerId]
+        );
+      }
       await client.query('COMMIT');
     } catch (error) {
       await client.query('ROLLBACK');
@@ -1008,6 +1048,46 @@ export class PostgresAbyRepository implements AbyRepository {
     );
     if (!result.rows[0]) throw new AbyError('asset_not_found', 'Asset not found', 404);
     return (await this.getCatalogItem(ownerId, assetId))!;
+  }
+
+  async relocateAsset(ownerId: string, assetId: string, sourceObjectKey: string, targetObjectKey: string, collectionCode: string): Promise<CatalogItem> {
+    const client = await this.#pool.connect();
+    try {
+      await client.query('BEGIN');
+      const found = await client.query(
+        `SELECT checksum_sha256,canonical_metadata FROM aby.assets
+         WHERE id=$1 AND owner_id=$2 AND state='active' AND object_key=$3 FOR UPDATE`,
+        [assetId, ownerId, sourceObjectKey]
+      );
+      const row = found.rows[0];
+      if (!row) throw new AbyError('asset_relocation_conflict', 'Asset changed before relocation could be committed', 409);
+      const candidates = row.canonical_metadata.storageRetirementCandidates ?? [];
+      const canonicalMetadata = {
+        ...row.canonical_metadata,
+        collectionCode,
+        canonicalObjectKey: targetObjectKey,
+        storageRetirementCandidates: [{
+          sourceObjectKey, targetObjectKey, checksumSha256: row.checksum_sha256,
+          state: 'candidate', copiedAt: new Date().toISOString()
+        }, ...candidates]
+      };
+      await client.query(
+        'UPDATE aby.assets SET object_key=$1,canonical_metadata=$2,updated_at=now() WHERE id=$3',
+        [targetObjectKey, canonicalMetadata, assetId]
+      );
+      await client.query('COMMIT');
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+    return (await this.getCatalogItem(ownerId, assetId))!;
+  }
+
+  async objectKeyInUse(objectKey: string): Promise<boolean> {
+    const result = await this.#pool.query("SELECT 1 FROM aby.assets WHERE object_key=$1 AND state='active' LIMIT 1", [objectKey]);
+    return Boolean(result.rows[0]);
   }
 
   async createSegment(ownerId: string, input: SegmentCreate, provenance: Provenance): Promise<Segment> {

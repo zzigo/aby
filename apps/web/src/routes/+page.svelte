@@ -2,11 +2,11 @@
   import { onMount } from 'svelte';
   import { SvelteURLSearchParams } from 'svelte/reactivity';
   import type { Asset, IngestPreview, Segment } from '@zztt/aby-domain';
-  import type { PageData } from './$types';
   import { loadPlayback, loadSegmentPlayback } from '$lib/player';
   import { formatDuration, formatTechnicalFormat } from '$lib/presentation';
 
-  let { data }: { data: PageData } = $props();
+  type SharedPageData = { user: { id: string; name?: string | null; email?: string | null; picture?: string | null } | null };
+  let { data }: { data: SharedPageData } = $props();
 
   let preview = $state<IngestPreview | null>(null);
   let asset = $state<Asset | null>(null);

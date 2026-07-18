@@ -24,6 +24,7 @@
     tracklist?: Array<{ position?: string; title: string; duration?: string }>;
     dataQuality?: string;
     durationMs?: number;
+    notes?: string;
   }
 
   let { items: initialItems, onclose, onsaved }: {
@@ -42,6 +43,9 @@
   const embeddedArtist = $derived(sourceTag('album_artist', 'albumartist', 'artist'));
   const embeddedDate = $derived(sourceTag('date', 'year'));
   const localDurationMs = $derived(albumItems.reduce((total, item) => total + item.asset.technicalMetadata.durationMs, 0));
+  const canonicalCollectionCode = $derived(first?.asset.canonicalMetadata.collectionCode ?? '');
+  const relocationPending = $derived(albumItems.reduce((count, item) => count +
+    (item.asset.canonicalMetadata.storageRetirementCandidates ?? []).filter((candidate) => candidate.state === 'candidate').length, 0));
   let title = $state(untrack(() => initialItems[0]?.albumTitle ?? ''));
   let albumArtist = $state(untrack(() => initialItems[0]?.albumArtist ?? initialItems[0]?.creator ?? ''));
   let releaseDate = $state(untrack(() => initialItems[0]?.releaseDate ?? ''));
@@ -53,6 +57,8 @@
   let genres = $state<string[]>(untrack(() => [...(initialItems[0]?.asset.canonicalMetadata.genres ?? [])]));
   let styles = $state<string[]>(untrack(() => [...(initialItems[0]?.asset.canonicalMetadata.styles ?? [])]));
   let roles = $state<AlbumRole[]>(untrack(() => structuredClone(initialItems[0]?.asset.canonicalMetadata.roles ?? [])));
+  let notes = $state(untrack(() => initialItems[0]?.asset.canonicalMetadata.albumNotes ?? ''));
+  let collectionCode = $state(untrack(() => initialItems[0]?.asset.canonicalMetadata.collectionCode ?? ''));
   let candidate = $state<DiscogsCandidate | null>(untrack(() => {
     const value = initialItems[0]?.asset.canonicalMetadata.discogs;
     return value && typeof value === 'object' ? value as unknown as DiscogsCandidate : null;
@@ -123,7 +129,8 @@
       roles: roles.filter((role) => role.name.trim() && role.role.trim()).map((role) => ({
         ...role, name: role.name.trim(), role: role.role.trim(),
         ...(role.tracks?.trim() ? { tracks: role.tracks.trim() } : { tracks: undefined })
-      }))
+      })),
+      notes: notes || null
     };
   }
 
@@ -175,6 +182,57 @@
     }
   }
 
+  async function relocateCollection() {
+    if (!first || !collectionCode.trim()) return;
+    busy = true;
+    message = `Copying ${canonicalCollectionCode} → ${collectionCode.toUpperCase()}…`;
+    try {
+      let remaining = 1;
+      let copied = 0;
+      while (remaining > 0) {
+        const body = await jsonRequest(`/api/albums/${first.albumId}/relocate`, {
+          method: 'POST', headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ collectionCode, limit: 3 })
+        });
+        copied += body.copied;
+        remaining = body.remaining;
+        acceptItems(body.items);
+        message = `Verified ${copied} copies · ${remaining} remaining`;
+      }
+      message = `${copied} assets moved logically · old copies retained`;
+    } catch (error) {
+      message = error instanceof Error ? error.message : 'Relocation failed';
+    } finally {
+      busy = false;
+    }
+  }
+
+  async function retireOldCopies() {
+    if (!first || !relocationPending) return;
+    busy = true;
+    message = `Deleting ${relocationPending} verified old copies…`;
+    try {
+      let remaining = relocationPending;
+      let retired = 0;
+      while (remaining > 0) {
+        const body = await jsonRequest(`/api/albums/${first.albumId}/relocate`, {
+          method: 'DELETE', headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ limit: 5 })
+        });
+        retired += body.retired;
+        remaining = body.remaining;
+        acceptItems(body.items);
+        message = `Deleted ${retired} old copies · ${remaining} remaining`;
+        if (!body.retired && remaining) throw new Error('Old copies could not be retired safely');
+      }
+      message = `${retired} verified old copies deleted`;
+    } catch (error) {
+      message = error instanceof Error ? error.message : 'Old-copy cleanup failed';
+    } finally {
+      busy = false;
+    }
+  }
+
   async function refreshDiscogs() {
     if (!first) return;
     busy = true;
@@ -206,6 +264,7 @@
       candidate = applied;
       title = applied.title;
       albumArtist = applied.creator;
+      if (applied.notes && !notes.trim()) notes = applied.notes;
       releaseDate = applied.releaseDate || applied.year || '';
       label = applied.label || '';
       catalogNumber = applied.catalogNumber || '';
@@ -270,8 +329,16 @@
           <label>Catalog no.<input bind:value={catalogNumber} /></label>
           <label>Declared duration<input bind:value={albumDuration} placeholder="MM:SS or HH:MM:SS" /></label>
           <label class="wide-field">Album tags<input bind:value={albumTags} placeholder="opera, contemporary" /></label>
+          <label>Collection<input bind:value={collectionCode} placeholder="18, 20E, 20L…" /></label>
+          <label class="wide-field">Notes<textarea bind:value={notes} placeholder="Manual notes · Ollama extraction will be available here"></textarea></label>
         </div>
         <div class="duration-compare"><span>DECLARED {albumDuration || '—'}</span><span>ASSETS {formatDuration(localDurationMs)}</span></div>
+        <div class="relocation-actions">
+          {#if collectionCode.trim().toUpperCase() !== canonicalCollectionCode}
+            <button onclick={relocateCollection} disabled={busy}>COPY + VERIFY {canonicalCollectionCode} → {collectionCode.trim().toUpperCase()}</button>
+          {/if}
+          {#if relocationPending}<button class="retire" onclick={retireOldCopies} disabled={busy}>DELETE {relocationPending} VERIFIED OLD COPIES</button>{/if}
+        </div>
         <div class="dependencies"><span>WORK {first.asset.workId}</span><span>ALBUM {first.albumId}</span><span>{albumItems.length} TRACKS INHERIT RELEASE FIELDS</span></div>
       </section>
 
@@ -287,7 +354,7 @@
         <div class="section-title"><h2>Tracks</h2><small>Title, number and technical data remain track-specific</small></div>
         <ol>
           {#each albumItems as item (item.asset.id)}
-            <li><span>{item.trackNumber ?? '—'}</span><strong>{item.recordingTitle}</strong><small>{item.asset.technicalMetadata.formatName}</small></li>
+            <li><span>{item.trackNumber ?? '—'}</span><strong>{item.recordingTitle.replace(/^track\s+/i, '')}</strong><small>{item.asset.technicalMetadata.formatName}</small></li>
           {/each}
         </ol>
       </section>
@@ -375,7 +442,8 @@
 
 <style>
   .album-editor{position:fixed;inset:0;z-index:1100;background:#0b0c0b;color:#f2f3ef;display:grid;grid-template-rows:auto 1fr auto;font-family:ui-monospace,SFMono-Regular,monospace}
-  header,footer{display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid #30332e}footer{border-top:1px solid #30332e;border-bottom:0;gap:20px}footer>div{display:grid;gap:5px;max-width:760px}h1,h2{margin:0}h1{font-size:clamp(18px,3vw,32px);font-weight:500}h2{font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:#9ba394;margin-bottom:14px}small{color:#7f867b}.close{font-size:36px;border:0;background:none;color:#fff}.album-editor>main{width:100%;min-height:0;margin:0;padding:0;overflow:auto;display:grid;grid-template-columns:minmax(0,2fr) minmax(260px,1fr)}section{padding:20px;border-right:1px solid #30332e;border-bottom:1px solid #30332e}.canonical,.tracks,.embedded{grid-column:1}.cover-section,.discogs{grid-column:2}.discogs,.embedded{background:#151a14}.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.grid label{font-size:10px;color:#9ba394}.grid input{display:block;width:100%;box-sizing:border-box;margin-top:5px;background:#111310;color:#fff;border:1px solid #30332e;padding:11px;font:inherit}.dependencies{display:flex;flex-wrap:wrap;gap:8px;margin-top:18px}.dependencies span{font-size:9px;color:#737a70;border:1px solid #30332e;padding:6px}.drop{min-height:260px;display:grid;place-items:center;border:1px dashed #596052;cursor:pointer;overflow:hidden}.drop img{width:100%;height:100%;max-height:420px;object-fit:contain}.drop input{display:none}.section-title{display:flex;justify-content:space-between;align-items:start;gap:12px}.section-title button,footer button,.discogs .apply{border:1px solid #4a5047;background:#111310;color:#fff;padding:9px 13px;font:inherit;font-size:10px}.tracks ol{list-style:none;padding:0;margin:0}.tracks li{display:grid;grid-template-columns:44px 1fr auto;gap:10px;padding:10px 0;border-bottom:1px solid #252823;font-size:11px}.tracks li>span,.tracks li>small{color:#7f867b}.tracks li>strong{font-weight:500}.embedded dl,.discogs dl{display:grid;grid-template-columns:90px 1fr;gap:8px;font-size:11px}.embedded dt,.discogs dt{color:#7f867b}.embedded dd,.discogs dd{margin:0;overflow-wrap:anywhere}.embedded .conflict,.warning{color:#ff9b7a}.discogs-query{display:grid;grid-template-columns:1fr 1.4fr 64px;gap:6px;margin-bottom:14px}.discogs-query input{min-width:0;background:#0d0f0d;color:#fff;border:1px solid #353a32;padding:8px;font:9px ui-monospace,monospace}.discogs a{display:inline-block;margin-top:14px;color:#c8ff52;font-size:10px}.discogs p{font-size:11px;color:#7f867b}.discogs .apply{width:100%;margin-top:14px;background:#c8ff52;color:#10110f}.save{background:#c8ff52!important;color:#10110f!important}footer span{font-size:10px;color:#c8ff52}footer small{font-size:8px;line-height:1.35}
+  header,footer{display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid #30332e}footer{border-top:1px solid #30332e;border-bottom:0;gap:20px}footer>div{display:grid;gap:5px;max-width:760px}h1,h2{margin:0}h1{font-size:clamp(18px,3vw,32px);font-weight:500}h2{font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:#9ba394;margin-bottom:14px}small{color:#7f867b}.close{font-size:36px;border:0;background:none;color:#fff}.album-editor>main{width:100%;min-height:0;margin:0;padding:0;overflow:auto;display:grid;grid-template-columns:minmax(0,2fr) minmax(260px,1fr)}section{padding:20px;border-right:1px solid #30332e;border-bottom:1px solid #30332e}.canonical,.tracks,.embedded{grid-column:1}.cover-section,.discogs{grid-column:2}.discogs,.embedded{background:#151a14}.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.grid label{font-size:10px;color:#9ba394}.grid input,.grid textarea{display:block;width:100%;box-sizing:border-box;margin-top:5px;background:#111310;color:#fff;border:1px solid #30332e;padding:11px;font:inherit}.grid textarea{min-height:110px;resize:vertical}.dependencies{display:flex;flex-wrap:wrap;gap:8px;margin-top:18px}.dependencies span{font-size:9px;color:#737a70;border:1px solid #30332e;padding:6px}.drop{min-height:260px;display:grid;place-items:center;border:1px dashed #596052;cursor:pointer;overflow:hidden}.drop img{width:100%;height:100%;max-height:420px;object-fit:contain}.drop input{display:none}.section-title{display:flex;justify-content:space-between;align-items:start;gap:12px}.section-title button,footer button,.discogs .apply{border:1px solid #4a5047;background:#111310;color:#fff;padding:9px 13px;font:inherit;font-size:10px}.tracks ol{list-style:none;padding:0;margin:0}.tracks li{display:grid;grid-template-columns:44px 1fr auto;gap:10px;padding:10px 0;border-bottom:1px solid #252823;font-size:11px}.tracks li>span,.tracks li>small{color:#7f867b}.tracks li>strong{font-weight:500}.embedded dl,.discogs dl{display:grid;grid-template-columns:90px 1fr;gap:8px;font-size:11px}.embedded dt,.discogs dt{color:#7f867b}.embedded dd,.discogs dd{margin:0;overflow-wrap:anywhere}.embedded .conflict,.warning{color:#ff9b7a}.discogs-query{display:grid;grid-template-columns:1fr 1.4fr 64px;gap:6px;margin-bottom:14px}.discogs-query input{min-width:0;background:#0d0f0d;color:#fff;border:1px solid #353a32;padding:8px;font:9px ui-monospace,monospace}.discogs a{display:inline-block;margin-top:14px;color:#c8ff52;font-size:10px}.discogs p{font-size:11px;color:#7f867b}.discogs .apply{width:100%;margin-top:14px;background:#c8ff52;color:#10110f}.save{background:#c8ff52!important;color:#10110f!important}footer span{font-size:10px;color:#c8ff52}footer small{font-size:8px;line-height:1.35}
   .wide-field{grid-column:1/-1}.duration-compare{display:flex;gap:8px;margin-top:10px}.duration-compare span{font-size:9px;color:#7f867b}.roles-section{grid-column:1}.roles{display:grid;gap:6px}.role-row{display:grid;grid-template-columns:1.4fr 1fr .7fr 34px;gap:6px}.role-row input{min-width:0;background:#0d0f0d;color:#fff;border:1px solid #353a32;padding:8px;font:9px ui-monospace,monospace}.role-row button,.descriptors button{border:1px solid #4a5047;background:#111310;color:#fff;font:9px ui-monospace,monospace}.descriptors{grid-column:2;background:#151a14}.descriptors h3{margin:16px 0 7px;color:#7f867b;font-size:9px;text-transform:uppercase}.tag-list{display:flex;flex-wrap:wrap;gap:5px}.tag-list button{padding:6px 8px}.tag-list button.linked{border-color:#c8ff52;color:#c8ff52}.tag-list.legacy button{color:#9b9f98}.descriptors p{font-size:9px;color:#7f867b;line-height:1.5}.canonical-tags button{background:#c8ff52;color:#10110f}.footer-actions{display:flex!important;gap:8px;max-width:none!important}
+  .relocation-actions{display:flex;flex-wrap:wrap;gap:7px;margin-top:12px}.relocation-actions button{border:1px solid var(--signal);background:transparent;color:var(--signal);padding:8px;font:9px ui-monospace,monospace}.relocation-actions .retire{border-color:#ff8e78;color:#ff8e78}
   @media(max-width:720px){.album-editor>main{display:block}.grid{grid-template-columns:1fr}.album-editor header,.album-editor footer{padding:12px}.album-editor section{padding:14px;border-right:0}.drop{min-height:190px}footer>div{max-width:65%}footer small{display:none}}
 </style>

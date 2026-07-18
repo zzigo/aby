@@ -117,7 +117,7 @@ describe('preview-before-write repository flow', () => {
       title: 'Sind', albumArtist: 'Axel Dörner', releaseDate: '2007',
       label: 'absinthRecords', catalogNumber: 'absinthRecords 010', albumDurationMs: 252_000,
       albumTags: ['Free Improvisation'], genres: ['Jazz'], styles: ['Free Improvisation'],
-      roles: [{ name: 'Axel Dörner', role: 'Trumpet' }]
+      roles: [{ name: 'Axel Dörner', role: 'Trumpet' }], notes: 'Release notes'
     }, {
       imageCandidates: [{
         authority: 'discogs', url: 'https://i.discogs.com/sind.jpeg', kind: 'cover',
@@ -136,7 +136,39 @@ describe('preview-before-write repository flow', () => {
       expect(item.asset.canonicalMetadata.albumDurationMs).toBe(252_000);
       expect(item.asset.canonicalMetadata.albumTags).toEqual(['Free Improvisation']);
       expect(item.asset.canonicalMetadata.roles).toEqual([{ name: 'Axel Dörner', role: 'Trumpet' }]);
+      expect(item.asset.canonicalMetadata.albumNotes).toBe('Release notes');
     }
+  });
+
+  test('relocates canonical identity while retaining a verified cleanup candidate', async () => {
+    const repository = new MemoryAbyRepository();
+    const preview = await repository.savePreview(fixturePreview());
+    const asset = await repository.commitPreview('owner-a', preview.id, 'Work', 'Track', 'Album');
+    const target = 'aby/aud/18/test.wav';
+    const moved = await repository.relocateAsset('owner-a', asset.id, asset.objectKey, target, '18');
+    expect(moved.asset.objectKey).toBe(target);
+    expect(moved.asset.canonicalMetadata.collectionCode).toBe('18');
+    expect(moved.asset.canonicalMetadata.storageRetirementCandidates?.[0]).toMatchObject({
+      sourceObjectKey: asset.objectKey, targetObjectKey: target, checksumSha256: asset.checksumSha256, state: 'candidate'
+    });
+    expect(await repository.objectKeyInUse(asset.objectKey)).toBe(false);
+    expect(await repository.objectKeyInUse(target)).toBe(true);
+  });
+
+  test('propagates an album title edited from a track to its album siblings', async () => {
+    const repository = new MemoryAbyRepository();
+    const collective = fixturePreview();
+    collective.candidateMetadata.tracks = [
+      { objectKey: collective.objectKey, canonicalObjectKey: collective.objectKey, originalFilename: '01.wav', checksumSha256: collective.checksumSha256, technicalMetadata: collective.technicalMetadata, recordingTitle: 'One', trackNumber: 1 },
+      { objectKey: 'aby/aud/demo/02.wav', canonicalObjectKey: 'aby/aud/demo/02.wav', originalFilename: '02.wav', checksumSha256: 'b'.repeat(64), technicalMetadata: collective.technicalMetadata, recordingTitle: 'Two', trackNumber: 2 }
+    ];
+    const preview = await repository.savePreview(collective);
+    await repository.commitPreview('owner-a', preview.id, 'Work', 'One', 'Old album');
+    const items = await repository.listCatalog('owner-a');
+    await repository.updateCatalogItem('owner-a', items[0]!.asset.id, {
+      workTitle: 'Work', albumTitle: 'Canonical album', recordingTitle: 'One'
+    });
+    expect((await repository.listCatalog('owner-a')).map((item) => item.albumTitle)).toEqual(['Canonical album', 'Canonical album']);
   });
 
   test('promotion switches authority and preserves the source as retirement provenance', async () => {

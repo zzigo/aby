@@ -3,20 +3,23 @@
   import { SvelteMap } from 'svelte/reactivity';
   import type { CatalogItem, CatalogSegment } from '@zztt/aby-domain';
   import type { PageData } from './$types';
-  import { formatDuration } from '$lib/presentation';
+  import { displayTrackTitle, formatDuration, formatTechnicalFormat } from '$lib/presentation';
   import {
     currentPlayback,
     currentPlaybackTimeMs,
     loadPlayback,
     loadSegmentPlayback,
     setPlaybackCatalog,
+    stepPlayback,
     type PlaybackContextItem
   } from '$lib/player';
   import SpectrogramView from '$lib/components/SpectrogramView.svelte';
+  import WaveformView from '$lib/components/WaveformView.svelte';
   import TrackEditor from '$lib/components/TrackEditor.svelte';
   import AlbumEditor from '$lib/components/AlbumEditor.svelte';
+  import GalleryView from '$lib/components/GalleryView.svelte';
 
-  const views = ['Cover', 'Spectrogram'] as const;
+  const views = ['Cover', 'Waveform', 'Spectrogram', 'Gallery'] as const;
   type CatalogMode = 'album' | 'work' | 'creator' | 'folder' | 'tag';
   let { data }: { data: PageData } = $props();
   let items = $state<CatalogItem[]>([]);
@@ -34,6 +37,7 @@
   let openActionsId = $state<string | null>(null);
   let editingItem = $state<CatalogItem | null>(null);
   let editingAlbumItems = $state<CatalogItem[] | null>(null);
+  let coverFlipped = $state(false);
   let itemGesture = { id: '', x: 0, y: 0 };
   let suppressClickId = '';
   let gestureStart = { x: 0, y: 0 };
@@ -59,7 +63,7 @@
     const query = catalogQuery.trim().toLocaleLowerCase();
     if (!query) return folderItems;
     return folderItems.filter((item) => [
-      item.workTitle, item.albumTitle, item.recordingTitle, item.creator,
+      item.workTitle, item.albumTitle, item.recordingTitle, item.creator, item.albumArtist,
       item.asset.canonicalMetadata.collectionCode, item.asset.objectKey,
       ...(item.asset.canonicalMetadata.tags ?? []),
       ...(item.asset.canonicalMetadata.albumTags ?? []),
@@ -104,11 +108,11 @@
     return [...groups.values()].map((group) => ({ ...group, items: sortTracks(group.items) }))
       .sort((left, right) => left.title.localeCompare(right.title));
   });
-  const creatorGroups = $derived.by(() => nestedGroups(visibleItems, (item) => item.creator || 'Unknown', (item) => item.workTitle));
+  const creatorGroups = $derived.by(() => nestedGroups(visibleItems, (item) => item.albumArtist || item.creator || 'Unknown', (item) => item.workTitle));
   const folderGroups = $derived.by(() => nestedGroups(
     visibleItems,
     (item) => item.asset.canonicalMetadata.collectionCode || item.asset.objectKey.split('/')[2] || 'uncatalogued',
-    (item) => item.creator || item.asset.objectKey.split('/')[3] || 'Unknown'
+    (item) => item.albumArtist || item.creator || item.asset.objectKey.split('/')[3] || 'Unknown'
   ));
   const tagGroups = $derived.by(() => {
     const groups = new SvelteMap<string, { id: string; title: string; items: CatalogItem[] }>();
@@ -177,8 +181,8 @@
   function playbackContext(item: CatalogItem): PlaybackContextItem {
     return {
       assetId: item.asset.id,
-      title: item.recordingTitle,
-      subtitle: item.creator ?? item.albumTitle ?? item.workTitle,
+      title: displayTrackTitle(item.recordingTitle, item.trackNumber),
+      subtitle: item.albumArtist ?? item.creator ?? item.albumTitle ?? item.workTitle,
       ...(item.albumId ? { albumId: item.albumId } : {}),
       ...(item.trackNumber !== undefined ? { trackNumber: item.trackNumber } : {})
     };
@@ -247,11 +251,23 @@
 
   onMount(() => currentPlayback.subscribe((playback) => {
     if (!playback) return;
-    selected = items.find((item) => item.asset.id === playback.assetId) ?? selected;
+    const next = items.find((item) => item.asset.id === playback.assetId);
+    if (next && next.asset.id !== selected?.asset.id) {
+      selected = next;
+      coverFlipped = false;
+    }
   }));
 
   function selectView(direction: number) {
     viewIndex = (viewIndex + direction + views.length) % views.length;
+  }
+
+  async function stepTrack(direction: -1 | 1) {
+    coverFlipped = false;
+    await stepPlayback(direction).catch((error) => {
+      message = error instanceof Error ? error.message : 'Track navigation failed';
+      return false;
+    });
   }
 
   function startViewGesture(event: TouchEvent) {
@@ -278,6 +294,7 @@
 
   async function playItem(item: CatalogItem) {
     selected = item;
+    coverFlipped = false;
     drawerOpen = false;
     message = '';
     try {
@@ -292,6 +309,12 @@
     }
   }
 
+  function selectFromGallery(item: CatalogItem) {
+    selected = item;
+    coverFlipped = false;
+    viewIndex = 0;
+  }
+
   async function playSegment(item: CatalogItem, segment: CatalogSegment) {
     selected = item;
     drawerOpen = false;
@@ -299,7 +322,7 @@
       await loadSegmentPlayback(
         item.asset.id,
         segment.label || `${item.workTitle} · segment`,
-        item.creator ?? item.recordingTitle,
+        item.albumArtist ?? item.creator ?? displayTrackTitle(item.recordingTitle, item.trackNumber),
         segment.startTimeMs,
         segment.endTimeMs
       );
@@ -472,29 +495,47 @@
   <meta name="description" content="A touch-first catalog and temporal media instrument." />
 </svelte:head>
 
-<main class:transport-active={Boolean($currentPlayback)} class="instrument-shell">
+<main class:transport-active={Boolean($currentPlayback)} class:gallery-active={viewIndex === 3} class="instrument-shell">
   <section class="instrument-stage" ontouchstart={startViewGesture} ontouchend={endViewGesture} aria-label={`${views[viewIndex]} visualization`}>
     {#if message}<div class="instrument-status">{message}</div>{/if}
 
     {#if selected}
       {#if viewIndex === 0}
         <div class="cover-view">
-          <button class="cover-touch" onclick={() => playItem(selected!)} aria-label={`Play ${selected.workTitle}`}>
-            {#if selected.coverUrl}
-              <img src={selected.coverUrl} alt={`Candidate artwork for ${selected.workTitle}`} />
-            {:else}
-              <span class="cover-fallback"><small>{selected.creator ?? 'Aby'}</small><strong>{selected.workTitle}</strong></span>
-            {/if}
-            <span class="cover-play">{$currentPlayback?.assetId === selected.asset.id ? 'Reload' : 'Play'}</span>
-          </button>
+          <div class:flipped={coverFlipped} class="cover-flip">
+            <button class="cover-touch cover-front" onclick={() => coverFlipped = true} aria-label={`Show metadata for ${selected.albumTitle ?? selected.workTitle}`}>
+              {#if selected.coverUrl}
+                <img src={selected.coverUrl} alt={`Cover for ${selected.albumTitle ?? selected.workTitle}`} />
+              {:else}
+                <span class="cover-fallback"><small>{selected.albumArtist ?? selected.creator ?? 'Aby'}</small><strong>{selected.albumTitle ?? selected.workTitle}</strong></span>
+              {/if}
+            </button>
+            <button class="cover-back" onclick={() => coverFlipped = false} aria-label="Return to cover">
+              <dl>
+                <div><dt>Track</dt><dd>{displayTrackTitle(selected.recordingTitle, selected.trackNumber)}</dd></div>
+                <div><dt>Album</dt><dd>{selected.albumTitle ?? '—'}</dd></div>
+                <div><dt>Artist</dt><dd>{selected.albumArtist ?? selected.creator ?? '—'}</dd></div>
+                <div><dt>Work</dt><dd>{selected.workTitle}</dd></div>
+                <div><dt>Release</dt><dd>{selected.releaseDate ?? '—'}</dd></div>
+                <div><dt>Label</dt><dd>{selected.label ?? '—'}</dd></div>
+                <div><dt>Format</dt><dd>{formatTechnicalFormat(selected.asset.technicalMetadata)}</dd></div>
+                <div><dt>Length</dt><dd>{formatDuration(selected.asset.technicalMetadata.durationMs)}</dd></div>
+                <div class="notes"><dt>Notes</dt><dd>{selected.asset.canonicalMetadata.notes ?? selected.asset.canonicalMetadata.albumNotes ?? '—'}</dd></div>
+              </dl>
+            </button>
+          </div>
           <div class="instrument-copy">
             <span class="eyebrow">{selected.releaseDate ?? 'Undated'}{selected.label ? ` · ${selected.label}` : ''}</span>
-            <h1>{selected.workTitle}</h1>
-            <p>{selected.creator ?? selected.recordingTitle}</p>
+            <h1>{selected.albumTitle ?? selected.workTitle}</h1>
+            <p>{selected.albumArtist ?? selected.creator ?? displayTrackTitle(selected.recordingTitle, selected.trackNumber)}</p>
           </div>
         </div>
-      {:else}
+      {:else if viewIndex === 1}
+        <WaveformView asset={selected.asset} onplay={() => playItem(selected!)} />
+      {:else if viewIndex === 2}
         <SpectrogramView asset={selected.asset} onplay={() => playItem(selected!)} />
+      {:else}
+        <GalleryView {items} onselect={selectFromGallery} />
       {/if}
     {:else if loading}
       <div class="instrument-empty">Opening the instrument…</div>
@@ -504,13 +545,17 @@
 
     <button class="view-arrow previous" onclick={() => selectView(-1)} aria-label="Previous visualization">←</button>
     <button class="view-arrow next" onclick={() => selectView(1)} aria-label="Next visualization">→</button>
-    {#if $currentPlayback}
+    {#if selected && viewIndex === 0}
+      <button class="track-edge previous-track" onclick={() => stepTrack(-1)} aria-label="Previous track"></button>
+      <button class="track-edge next-track" onclick={() => stepTrack(1)} aria-label="Next track"></button>
+    {/if}
+    {#if $currentPlayback && viewIndex !== 3}
       <button 
         class="master-capture-btn" 
         onpointerdown={handlePointerDown} 
         onpointerup={handlePointerUp}
         onpointercancel={handlePointerCancel}
-        style="position: absolute; right: 24px; bottom: 120px; width: 72px; height: 72px; border-radius: 50%; border: 2px solid {isPressing ? 'var(--signal)' : 'var(--line)'}; background: {isPressing ? 'var(--signal)' : 'rgba(23, 24, 23, 0.85)'}; color: {isPressing ? '#101110' : 'var(--signal)'}; display: grid; place-items: center; cursor: pointer; z-index: 15; box-shadow: 0 8px 32px rgba(0,0,0,0.5); backdrop-filter: blur(8px); transition: transform 0.15s, background 0.15s; font-size: 11px; font-weight: 700; font-family: ui-monospace, monospace; user-select: none;"
+        style="position: absolute; right: 24px; bottom: 140px; width: 72px; height: 72px; padding: 0; text-align: center; text-indent: -1px; border-radius: 50%; border: 2px solid {isPressing ? 'var(--signal)' : 'var(--line)'}; background: {isPressing ? 'var(--signal)' : 'rgba(23, 24, 23, 0.85)'}; color: {isPressing ? '#101110' : 'var(--signal)'}; display: grid; place-items: center; cursor: pointer; z-index: 15; box-shadow: 0 8px 32px rgba(0,0,0,0.5); backdrop-filter: blur(8px); transition: transform 0.15s, background 0.15s; font-size: 11px; line-height: 1; font-weight: 700; font-family: ui-monospace, monospace; user-select: none;"
         aria-label="Capture segment"
       >
         {isPressing ? 'RECORD' : 'CAPTURE'}
@@ -567,7 +612,7 @@
         <button class="catalog-primary" onclick={() => playFromCatalog(item)} onpointerdown={(event) => startItemGesture(event, item)} onpointerup={(event) => endItemGesture(event, item)} onpointercancel={(event) => cancelItemGesture(event, item)}>
           <span class="catalog-index">{item.trackNumber ? String(item.trackNumber).padStart(2, '0') : '—'}</span>
           {#if item.coverUrl}<img src={item.coverUrl} alt="" />{:else}<span class="catalog-cover-fallback">A</span>{/if}
-          <span class="catalog-copy"><strong>{item.recordingTitle}</strong><small>{item.creator ?? item.workTitle}</small></span>
+          <span class="catalog-copy"><strong>{displayTrackTitle(item.recordingTitle, item.trackNumber)}</strong><small>{item.albumArtist ?? item.creator ?? item.workTitle}</small></span>
           <span class="catalog-duration">{formatDuration(item.asset.technicalMetadata.durationMs)}</span>
         </button>
         <button class="catalog-edit" onclick={() => editItem(item)} title="Edit track" aria-label={`Edit ${item.recordingTitle}`}>✎</button>

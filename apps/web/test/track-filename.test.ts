@@ -17,6 +17,6 @@ test('keeps an unnumbered track readable', () => {
 });
 
 test('sanitizes a bare numeric track prefix from editable titles', () => {
-  expect(parseTrackTitle('22 track 22')).toEqual({ trackNumber: 22, title: 'track 22' });
+  expect(parseTrackTitle('22 track 22')).toEqual({ trackNumber: 22, title: '22' });
   expect(parseTrackTitle('03 — AHI, CHE NON PUR')).toEqual({ trackNumber: 3, title: 'AHI, CHE NON PUR' });
 });
