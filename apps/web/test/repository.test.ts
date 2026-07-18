@@ -168,10 +168,11 @@ describe('preview-before-write repository flow', () => {
     const repository = new MemoryAbyRepository();
     const preview = await repository.savePreview(fixturePreview());
     const asset = await repository.commitPreview('owner-a', preview.id, 'Work', 'Track', 'Album');
-    const target = 'aby/aud/18/test.wav';
-    const moved = await repository.relocateAsset('owner-a', asset.id, asset.objectKey, target, '18');
+    const target = 'aby/aud/18/schubert/Work/Album/01.wav';
+    const moved = await repository.relocateAsset('owner-a', asset.id, asset.objectKey, target, '18', 'schubert');
     expect(moved.asset.objectKey).toBe(target);
     expect(moved.asset.canonicalMetadata.collectionCode).toBe('18');
+    expect(moved.asset.canonicalMetadata.entitySlug).toBe('schubert');
     expect(moved.asset.canonicalMetadata.storageRetirementCandidates?.[0]).toMatchObject({
       sourceObjectKey: asset.objectKey, targetObjectKey: target, checksumSha256: asset.checksumSha256, state: 'candidate'
     });

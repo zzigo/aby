@@ -1,4 +1,5 @@
 import { basename, extname } from 'node:path';
+import { repairLegacyDiacritics } from './text-repair';
 
 export interface ParsedTrackTitle {
   title: string;
@@ -6,7 +7,7 @@ export interface ParsedTrackTitle {
 }
 
 export function parseTrackTitle(value: string): ParsedTrackTitle {
-  const trimmed = value.trim();
+  const trimmed = repairLegacyDiacritics(value).trim();
   const match = trimmed.match(/^(\d{1,3})(?:\s*[.\-_–—:)]+\s*|\s+)(.+?)\s*$/u);
   if (!match?.[1] || !match[2]) return { title: trimmed };
   const trackNumber = Number(match[1]);

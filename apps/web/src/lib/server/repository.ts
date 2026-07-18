@@ -5,6 +5,7 @@ import { AbyError } from './errors';
 import { readConfig } from './config';
 import { parseTrackTitle } from './track-title';
 import { preferredCoverCandidate } from './image-candidates';
+import { repairLegacyDiacritics } from './text-repair';
 
 export type TimedTextSaveInput = Omit<TimedTextDocument, 'id' | 'assetId' | 'createdAt' | 'updatedAt'>;
 
@@ -70,7 +71,7 @@ export interface AbyRepository {
   getConversionSettings(ownerId: string): Promise<ConversionSettings>;
   saveConversionSettings(ownerId: string, settings: ConversionSettings): Promise<ConversionSettings>;
   mergeCanonicalMetadata(ownerId: string, assetId: string, metadata: Record<string, unknown>): Promise<CatalogItem>;
-  relocateAsset(ownerId: string, assetId: string, sourceObjectKey: string, targetObjectKey: string, collectionCode: string): Promise<CatalogItem>;
+  relocateAsset(ownerId: string, assetId: string, sourceObjectKey: string, targetObjectKey: string, collectionCode: string, entitySlug?: string): Promise<CatalogItem>;
   objectKeyInUse(objectKey: string): Promise<boolean>;
   getAsset(ownerId: string, assetId: string): Promise<Asset | null>;
   getSpectrogramAnalysis(ownerId: string, assetId: string): Promise<SpectrogramAnalysis | null>;
@@ -89,16 +90,21 @@ function accepted(provenance: Provenance, actorId: string): Provenance {
 
 function albumReleaseFields(input: AlbumEdit, albumArtist: string | null | undefined) {
   return {
-    albumArtist: albumArtist ?? null,
+    albumArtist: albumArtist ? repairLegacyDiacritics(albumArtist) : null,
+    ...(input.creator !== undefined ? { creator: input.creator ? repairLegacyDiacritics(input.creator) : null } : {}),
     releaseDate: input.releaseDate ?? null,
-    label: input.label ?? null,
+    label: input.label ? repairLegacyDiacritics(input.label) : null,
     catalogNumber: input.catalogNumber ?? null,
     ...(input.albumDurationMs !== undefined ? { albumDurationMs: input.albumDurationMs } : {}),
-    ...(input.albumTags !== undefined ? { albumTags: input.albumTags } : {}),
-    ...(input.genres !== undefined ? { genres: input.genres } : {}),
-    ...(input.styles !== undefined ? { styles: input.styles } : {}),
-    ...(input.roles !== undefined ? { roles: input.roles } : {}),
-    ...(input.notes !== undefined ? { albumNotes: input.notes } : {}),
+    ...(input.albumTags !== undefined ? { albumTags: input.albumTags.map(repairLegacyDiacritics) } : {}),
+    ...(input.genres !== undefined ? { genres: input.genres.map(repairLegacyDiacritics) } : {}),
+    ...(input.styles !== undefined ? { styles: input.styles.map(repairLegacyDiacritics) } : {}),
+    ...(input.roles !== undefined ? { roles: input.roles.map((role) => ({
+      ...role,
+      name: repairLegacyDiacritics(role.name),
+      role: repairLegacyDiacritics(role.role)
+    })) } : {}),
+    ...(input.notes !== undefined ? { albumNotes: input.notes ? repairLegacyDiacritics(input.notes) : input.notes } : {}),
     ...(input.collectionCode !== undefined ? { collectionCode: input.collectionCode.toUpperCase() } : {})
   };
 }
@@ -169,6 +175,10 @@ export class MemoryAbyRepository implements AbyRepository {
   ): Promise<Asset> {
     const preview = this.#previews.get(previewId);
     if (!preview || preview.ownerId !== ownerId) throw new AbyError('preview_not_found', 'Ingest preview not found', 404);
+    const finalWorkTitle = repairLegacyDiacritics(workTitle);
+    const finalAlbumTitle = albumTitle || preview.candidateMetadata.albumTitle
+      ? repairLegacyDiacritics(albumTitle || preview.candidateMetadata.albumTitle || '')
+      : undefined;
     const parsedRecording = parseTrackTitle(recordingTitle);
     if (preview.status === 'rejected') throw new AbyError('preview_not_committable', 'Rejected previews cannot be committed', 409);
     if (preview.candidateMetadata.canonicalObjectKey && preview.candidateMetadata.canonicalObjectKey !== preview.objectKey) {
@@ -186,7 +196,7 @@ export class MemoryAbyRepository implements AbyRepository {
       if (existing.checksumSha256 !== preview.checksumSha256) {
         throw new AbyError('canonical_asset_conflict', 'Canonical object key is already registered with a different checksum', 409);
       }
-      if (existing.canonicalMetadata.title !== workTitle || existing.canonicalMetadata.recordingTitle !== parsedRecording.title) {
+      if (existing.canonicalMetadata.title !== finalWorkTitle || existing.canonicalMetadata.recordingTitle !== parsedRecording.title) {
         throw new AbyError('canonical_metadata_conflict', 'Canonical asset already exists with different work or recording metadata', 409);
       }
       this.#previews.set(preview.id, { ...preview, status: 'committed' });
@@ -194,7 +204,7 @@ export class MemoryAbyRepository implements AbyRepository {
     }
     const now = new Date().toISOString();
     const workId = randomUUID();
-    const albumId = albumTitle || preview.candidateMetadata.albumTitle ? randomUUID() : undefined;
+    const albumId = finalAlbumTitle ? randomUUID() : undefined;
     const provenance = accepted({ ...preview.provenance, jobId: preview.id }, ownerId);
     
     const tracks = preview.candidateMetadata.tracks || [{
@@ -206,11 +216,14 @@ export class MemoryAbyRepository implements AbyRepository {
       trackNumber: preview.candidateMetadata.trackNumber ?? parsedRecording.trackNumber
     }];
 
-    const finalCreator = creator !== undefined ? creator : preview.candidateMetadata.creator;
-    const finalAlbumArtist = preview.candidateMetadata.albumArtist ?? finalCreator;
+    const rawCreator = creator !== undefined ? creator : preview.candidateMetadata.creator;
+    const finalCreator = rawCreator ? repairLegacyDiacritics(rawCreator) : rawCreator;
+    const rawAlbumArtist = preview.candidateMetadata.albumArtist ?? finalCreator;
+    const finalAlbumArtist = rawAlbumArtist ? repairLegacyDiacritics(rawAlbumArtist) : rawAlbumArtist;
     const finalDate = date !== undefined ? date : preview.candidateMetadata.date;
     const finalReleaseDate = releaseDate !== undefined ? releaseDate : preview.candidateMetadata.releaseDate;
-    const finalLabel = label !== undefined ? label : preview.candidateMetadata.label;
+    const rawLabel = label !== undefined ? label : preview.candidateMetadata.label;
+    const finalLabel = rawLabel ? repairLegacyDiacritics(rawLabel) : rawLabel;
     const finalCatalogNumber = catalogNumber !== undefined ? catalogNumber : preview.candidateMetadata.catalogNumber;
     const overrides = new Map(trackOverrides?.map((track) => [track.objectKey, track]) ?? []);
 
@@ -235,9 +248,9 @@ export class MemoryAbyRepository implements AbyRepository {
         technicalMetadata: track.technicalMetadata,
         canonicalMetadata: { 
           ...preview.candidateMetadata, 
-          title: workTitle, 
+          title: finalWorkTitle,
           recordingTitle: finalTrackTitle,
-          ...(albumTitle || preview.candidateMetadata.albumTitle ? { albumTitle: albumTitle || preview.candidateMetadata.albumTitle } : {}),
+          ...(finalAlbumTitle ? { albumTitle: finalAlbumTitle } : {}),
           ...(finalTrackNumber !== undefined ? { trackNumber: finalTrackNumber } : {}),
           creator: finalCreator,
           albumArtist: finalAlbumArtist,
@@ -333,25 +346,27 @@ export class MemoryAbyRepository implements AbyRepository {
   async updateCatalogItem(ownerId: string, assetId: string, input: TrackEdit): Promise<CatalogItem> {
     const asset = this.#assets.get(assetId);
     if (!asset || asset.ownerId !== ownerId) throw new AbyError('asset_not_found', 'Asset not found', 404);
+    const finalWorkTitle = repairLegacyDiacritics(input.workTitle);
+    const finalAlbumTitle = input.albumTitle ? repairLegacyDiacritics(input.albumTitle) : input.albumTitle;
     const parsedTrack = parseTrackTitle(input.recordingTitle);
     asset.canonicalMetadata = {
       ...asset.canonicalMetadata,
-      title: input.workTitle,
+      title: finalWorkTitle,
       recordingTitle: parsedTrack.title,
-      ...(input.albumTitle ? { albumTitle: input.albumTitle } : { albumTitle: undefined }),
+      ...(finalAlbumTitle ? { albumTitle: finalAlbumTitle } : { albumTitle: undefined }),
       ...(input.trackNumber || parsedTrack.trackNumber ? { trackNumber: input.trackNumber || parsedTrack.trackNumber } : { trackNumber: undefined }),
-      ...(input.creator ? { creator: input.creator } : { creator: undefined }),
+      ...(input.creator ? { creator: repairLegacyDiacritics(input.creator) } : { creator: undefined }),
       ...(input.date ? { date: input.date } : { date: undefined }),
       ...(input.releaseDate ? { releaseDate: input.releaseDate } : { releaseDate: undefined }),
-      ...(input.label ? { label: input.label } : { label: undefined }),
+      ...(input.label ? { label: repairLegacyDiacritics(input.label) } : { label: undefined }),
       ...(input.catalogNumber ? { catalogNumber: input.catalogNumber } : { catalogNumber: undefined }),
-      tags: input.tags ?? asset.canonicalMetadata.tags,
-      ...(input.notes ? { notes: input.notes } : { notes: undefined })
+      tags: input.tags?.map(repairLegacyDiacritics) ?? asset.canonicalMetadata.tags,
+      ...(input.notes ? { notes: repairLegacyDiacritics(input.notes) } : { notes: undefined })
     };
-    if (asset.albumId && input.albumTitle) {
+    if (asset.albumId && finalAlbumTitle) {
       for (const albumAsset of this.#assets.values()) {
         if (albumAsset.ownerId === ownerId && albumAsset.albumId === asset.albumId) {
-          albumAsset.canonicalMetadata = { ...albumAsset.canonicalMetadata, albumTitle: input.albumTitle };
+          albumAsset.canonicalMetadata = { ...albumAsset.canonicalMetadata, albumTitle: finalAlbumTitle };
         }
       }
     }
@@ -364,10 +379,12 @@ export class MemoryAbyRepository implements AbyRepository {
     for (const asset of assets) {
       const albumArtist = input.albumArtist ?? input.creator;
       const releaseFields = albumReleaseFields(input, albumArtist);
+      const { creator: releaseCreator, ...remainingReleaseFields } = releaseFields;
       asset.canonicalMetadata = {
         ...asset.canonicalMetadata,
-        albumTitle: input.title,
-        ...releaseFields,
+        albumTitle: repairLegacyDiacritics(input.title),
+        ...remainingReleaseFields,
+        ...(releaseCreator !== undefined ? { creator: releaseCreator ?? undefined } : {}),
         albumArtist: releaseFields.albumArtist ?? undefined,
         releaseDate: releaseFields.releaseDate ?? undefined,
         label: releaseFields.label ?? undefined,
@@ -432,7 +449,7 @@ export class MemoryAbyRepository implements AbyRepository {
     throw new AbyError('retirement_requires_database', 'Source retirement requires the persistent catalog', 503);
   }
 
-  async relocateAsset(ownerId: string, assetId: string, sourceObjectKey: string, targetObjectKey: string, collectionCode: string): Promise<CatalogItem> {
+  async relocateAsset(ownerId: string, assetId: string, sourceObjectKey: string, targetObjectKey: string, collectionCode: string, entitySlug?: string): Promise<CatalogItem> {
     const asset = this.#assets.get(assetId);
     if (!asset || asset.ownerId !== ownerId || asset.objectKey !== sourceObjectKey) throw new AbyError('asset_relocation_conflict', 'Asset changed before relocation could be committed', 409);
     const candidates = asset.canonicalMetadata.storageRetirementCandidates ?? [];
@@ -440,6 +457,7 @@ export class MemoryAbyRepository implements AbyRepository {
     asset.canonicalMetadata = {
       ...asset.canonicalMetadata,
       collectionCode,
+      ...(entitySlug ? { entitySlug } : {}),
       canonicalObjectKey: targetObjectKey,
       storageRetirementCandidates: [{ sourceObjectKey, targetObjectKey, checksumSha256: asset.checksumSha256, state: 'candidate', copiedAt: new Date().toISOString() }, ...candidates]
     };
@@ -594,6 +612,7 @@ export class PostgresAbyRepository implements AbyRepository {
       const result = await client.query('SELECT * FROM aby.ingest_candidates WHERE id=$1 AND owner_id=$2 FOR UPDATE', [previewId, ownerId]);
       const preview = result.rows[0];
       if (!preview) throw new AbyError('preview_not_found', 'Ingest preview not found', 404);
+      const finalWorkTitle = repairLegacyDiacritics(workTitle);
       const parsedRecording = parseTrackTitle(recordingTitle);
       if (preview.status === 'committed') {
         if (!preview.committed_asset_id) {
@@ -614,7 +633,8 @@ export class PostgresAbyRepository implements AbyRepository {
 
       const now = new Date().toISOString();
       const workId = randomUUID();
-      const finalAlbumTitle = albumTitle !== undefined ? albumTitle.trim() || undefined : preview.candidate_metadata.albumTitle;
+      const rawAlbumTitle = albumTitle !== undefined ? albumTitle.trim() || undefined : preview.candidate_metadata.albumTitle;
+      const finalAlbumTitle = rawAlbumTitle ? repairLegacyDiacritics(rawAlbumTitle) : undefined;
       const albumId = finalAlbumTitle ? randomUUID() : undefined;
       const provenance = accepted({ ...preview.provenance, jobId: preview.id }, ownerId);
       
@@ -627,11 +647,14 @@ export class PostgresAbyRepository implements AbyRepository {
         trackNumber: preview.candidate_metadata.trackNumber ?? parsedRecording.trackNumber
       }];
 
-      const finalCreator = creator !== undefined ? creator : preview.candidate_metadata.creator;
-      const finalAlbumArtist = preview.candidate_metadata.albumArtist ?? finalCreator;
+      const rawCreator = creator !== undefined ? creator : preview.candidate_metadata.creator;
+      const finalCreator = rawCreator ? repairLegacyDiacritics(rawCreator) : rawCreator;
+      const rawAlbumArtist = preview.candidate_metadata.albumArtist ?? finalCreator;
+      const finalAlbumArtist = rawAlbumArtist ? repairLegacyDiacritics(rawAlbumArtist) : rawAlbumArtist;
       const finalDate = date !== undefined ? date : preview.candidate_metadata.date;
       const finalReleaseDate = releaseDate !== undefined ? releaseDate : preview.candidate_metadata.releaseDate;
-      const finalLabel = label !== undefined ? label : preview.candidate_metadata.label;
+      const rawLabel = label !== undefined ? label : preview.candidate_metadata.label;
+      const finalLabel = rawLabel ? repairLegacyDiacritics(rawLabel) : rawLabel;
       const finalCatalogNumber = catalogNumber !== undefined ? catalogNumber : preview.candidate_metadata.catalogNumber;
       const overrides = new Map(trackOverrides?.map((track) => [track.objectKey, track]) ?? []);
 
@@ -648,7 +671,7 @@ export class PostgresAbyRepository implements AbyRepository {
 
       // 1. Insert unified Work with composition date in metadata
       const workMetadata = { date: finalDate };
-      await client.query('INSERT INTO aby.works(id,owner_id,title,metadata,provenance) VALUES($1,$2,$3,$4,$5)', [workId, ownerId, workTitle, workMetadata, provenance]);
+      await client.query('INSERT INTO aby.works(id,owner_id,title,metadata,provenance) VALUES($1,$2,$3,$4,$5)', [workId, ownerId, finalWorkTitle, workMetadata, provenance]);
       if (albumId && finalAlbumTitle) {
         await client.query(
           'INSERT INTO aby.albums(id,owner_id,work_id,title,metadata,provenance) VALUES($1,$2,$3,$4,$5,$6)',
@@ -711,7 +734,7 @@ export class PostgresAbyRepository implements AbyRepository {
 
         const canonicalMetadata = { 
           ...preview.candidate_metadata, 
-          title: workTitle, 
+          title: finalWorkTitle,
           recordingTitle: finalTrackTitle,
           albumTitle: finalAlbumTitle,
           trackNumber: finalTrackNumber,
@@ -1007,13 +1030,14 @@ export class PostgresAbyRepository implements AbyRepository {
       );
       const row = found.rows[0];
       if (!row) throw new AbyError('asset_not_found', 'Asset not found', 404);
+      const finalWorkTitle = repairLegacyDiacritics(input.workTitle);
       const parsedTrack = parseTrackTitle(input.recordingTitle);
       const finalTrackNumber = input.trackNumber ?? parsedTrack.trackNumber;
 
-      await client.query('UPDATE aby.works SET title=$1,updated_at=now() WHERE id=$2 AND owner_id=$3', [input.workTitle, row.work_id, ownerId]);
+      await client.query('UPDATE aby.works SET title=$1,updated_at=now() WHERE id=$2 AND owner_id=$3', [finalWorkTitle, row.work_id, ownerId]);
 
       let albumId: string | null = row.album_id;
-      const albumTitle = input.albumTitle?.trim() || null;
+      const albumTitle = input.albumTitle?.trim() ? repairLegacyDiacritics(input.albumTitle.trim()) : null;
       if (!albumTitle) {
         albumId = null;
       } else if (albumId) {
@@ -1030,23 +1054,23 @@ export class PostgresAbyRepository implements AbyRepository {
         ...row.recording_metadata,
         trackNumber: finalTrackNumber,
         releaseDate: input.releaseDate ?? undefined,
-        label: input.label ?? undefined,
+        label: input.label ? repairLegacyDiacritics(input.label) : undefined,
         catalogNumber: input.catalogNumber ?? undefined,
-        tags: input.tags ?? row.recording_metadata.tags
+        tags: input.tags?.map(repairLegacyDiacritics) ?? row.recording_metadata.tags
       };
       const canonicalMetadata = {
         ...row.canonical_metadata,
-        title: input.workTitle,
+        title: finalWorkTitle,
         recordingTitle: parsedTrack.title,
         albumTitle: albumTitle ?? undefined,
         trackNumber: finalTrackNumber,
-        creator: input.creator ?? undefined,
+        creator: input.creator ? repairLegacyDiacritics(input.creator) : undefined,
         date: input.date ?? undefined,
         releaseDate: input.releaseDate ?? undefined,
-        label: input.label ?? undefined,
+        label: input.label ? repairLegacyDiacritics(input.label) : undefined,
         catalogNumber: input.catalogNumber ?? undefined,
-        tags: input.tags ?? row.canonical_metadata.tags,
-        notes: input.notes ?? undefined
+        tags: input.tags?.map(repairLegacyDiacritics) ?? row.canonical_metadata.tags,
+        notes: input.notes ? repairLegacyDiacritics(input.notes) : undefined
       };
       await client.query(
         'UPDATE aby.recordings SET album_id=$1,title=$2,metadata=$3,updated_at=now() WHERE id=$4 AND owner_id=$5',
@@ -1078,12 +1102,13 @@ export class PostgresAbyRepository implements AbyRepository {
         'SELECT id FROM aby.albums WHERE id=$1 AND owner_id=$2 FOR UPDATE', [albumId, ownerId]
       );
       if (!album.rows[0]) throw new AbyError('album_not_found', 'Album not found', 404);
+      const finalAlbumTitle = repairLegacyDiacritics(input.title);
       const albumArtist = input.albumArtist ?? input.creator ?? null;
       const albumMetadata = albumReleaseFields(input, albumArtist);
-      const canonicalMetadata = { albumTitle: input.title, ...albumMetadata };
+      const canonicalMetadata = { albumTitle: finalAlbumTitle, ...albumMetadata };
       await client.query(
         'UPDATE aby.albums SET title=$1,metadata=jsonb_strip_nulls(metadata || $2::jsonb),updated_at=now() WHERE id=$3 AND owner_id=$4',
-        [input.title, albumMetadata, albumId, ownerId]
+        [finalAlbumTitle, albumMetadata, albumId, ownerId]
       );
       await client.query(
         `UPDATE aby.recordings SET metadata=jsonb_strip_nulls(metadata || $1::jsonb),updated_at=now()
@@ -1109,14 +1134,15 @@ export class PostgresAbyRepository implements AbyRepository {
     const client = await this.#pool.connect();
     try {
       await client.query('BEGIN');
+      const finalAlbumTitle = repairLegacyDiacritics(input.title);
       const albumArtist = input.albumArtist ?? input.creator ?? null;
       const albumMetadata = albumReleaseFields(input, albumArtist);
-      const canonicalMetadata = { albumTitle: input.title, ...albumMetadata };
+      const canonicalMetadata = { albumTitle: finalAlbumTitle, ...albumMetadata };
       const album = await client.query(
         `UPDATE aby.albums
          SET title=$1,metadata=jsonb_strip_nulls((metadata || $2::jsonb) || $3::jsonb),updated_at=now()
          WHERE id=$4 AND owner_id=$5 RETURNING id`,
-        [input.title, albumMetadata, metadata, albumId, ownerId]
+        [finalAlbumTitle, albumMetadata, metadata, albumId, ownerId]
       );
       if (!album.rows[0]) throw new AbyError('album_not_found', 'Album not found', 404);
       await client.query(
@@ -1199,7 +1225,7 @@ export class PostgresAbyRepository implements AbyRepository {
     return (await this.getCatalogItem(ownerId, assetId))!;
   }
 
-  async relocateAsset(ownerId: string, assetId: string, sourceObjectKey: string, targetObjectKey: string, collectionCode: string): Promise<CatalogItem> {
+  async relocateAsset(ownerId: string, assetId: string, sourceObjectKey: string, targetObjectKey: string, collectionCode: string, entitySlug?: string): Promise<CatalogItem> {
     const client = await this.#pool.connect();
     try {
       await client.query('BEGIN');
@@ -1214,6 +1240,7 @@ export class PostgresAbyRepository implements AbyRepository {
       const canonicalMetadata = {
         ...row.canonical_metadata,
         collectionCode,
+        ...(entitySlug ? { entitySlug } : {}),
         canonicalObjectKey: targetObjectKey,
         storageRetirementCandidates: [{
           sourceObjectKey, targetObjectKey, checksumSha256: row.checksum_sha256,

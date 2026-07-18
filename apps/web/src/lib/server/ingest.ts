@@ -13,6 +13,7 @@ import { fetchWikidataEntity } from './wikidata';
 import type { AbyRepository } from './repository';
 import { assertSourceObjectKey, downloadWasabiSourceObject, headWasabiSourceObject, normalizeObjectKey, listWasabiSiblingKeys } from './storage';
 import { parseTrackFilename } from './track-title';
+import { repairLegacyDiacritics } from './text-repair';
 
 function pathSegment(value: string): string {
   const segment = value.normalize('NFC').replace(/\p{Cc}/gu, '').replaceAll('/', '／').trim();
@@ -103,16 +104,16 @@ export async function inspectWasabiSource(
     const embeddedTag = (...names: string[]) => {
       const wanted = new Set(names.map((name) => name.toLowerCase()));
       const entry = Object.entries(embeddedTags).find(([name]) => wanted.has(name.toLowerCase()));
-      return entry?.[1]?.trim() || undefined;
+      return entry?.[1] ? repairLegacyDiacritics(entry[1]).trim() || undefined : undefined;
     };
     const embeddedAlbumTitle = embeddedTag('album');
     const embeddedArtist = embeddedTag('album_artist', 'albumartist', 'artist');
     const embeddedReleaseDate = embeddedTag('date', 'year');
-    const creator = identification?.artistName || input.creatorDisplay;
-    const albumArtist = identification?.artistName
-      || (embeddedArtist && !embeddedArtist.includes('\uFFFD') ? embeddedArtist : undefined)
-      || creator;
-    const workTitle = input.workTitle;
+    const creator = repairLegacyDiacritics(identification?.artistName || input.creatorDisplay);
+    const albumArtist = identification
+      ? creator
+      : (embeddedArtist && !embeddedArtist.includes('\uFFFD') ? embeddedArtist : creator);
+    const workTitle = repairLegacyDiacritics(input.workTitle);
     const entitySlug = identification?.artistName
       ? identification.artistName.normalize('NFKD')
           .replace(/[\u0300-\u036f]/g, '')
@@ -123,9 +124,10 @@ export async function inspectWasabiSource(
     const wikidata = creator ? await fetchWikidataEntity(creator) : null;
     const parsedMainTrack = parseTrackFilename(basename(sourceObjectKey));
     const requestedTrack = input.recordingTitle ? parseTrackFilename(`${input.recordingTitle}${extname(sourceObjectKey)}`) : null;
-    const recordingTitle = identification?.recordingTitle || requestedTrack?.title || parsedMainTrack.title || input.workTitle;
-    const albumTitle = identification?.releaseTitle || embeddedAlbumTitle
+    const recordingTitle = repairLegacyDiacritics(identification?.recordingTitle || requestedTrack?.title || parsedMainTrack.title || input.workTitle);
+    const rawAlbumTitle = identification?.releaseTitle || embeddedAlbumTitle
       || (siblingKeys.length > 1 ? basename(dirname(sourceObjectKey)) : undefined);
+    const albumTitle = rawAlbumTitle ? repairLegacyDiacritics(rawAlbumTitle) : undefined;
     const releaseDate = identification?.releaseDate || embeddedReleaseDate;
     const alternativeCover = !identification?.cover && albumArtist && albumTitle
       ? await findAlbumArtwork({ creator: albumArtist, albumTitle }).catch((error: unknown) => {

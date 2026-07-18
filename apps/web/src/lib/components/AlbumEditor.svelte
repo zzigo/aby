@@ -27,6 +27,13 @@
     notes?: string;
   }
 
+  interface ArtistCandidate {
+    id: string;
+    name: string;
+    sortName: string;
+    disambiguation: string;
+  }
+
   let { items: initialItems, onclose, onsaved }: {
     items: CatalogItem[];
     onclose: () => void;
@@ -44,10 +51,15 @@
   const embeddedDate = $derived(sourceTag('date', 'year'));
   const localDurationMs = $derived(albumItems.reduce((total, item) => total + item.asset.technicalMetadata.durationMs, 0));
   const canonicalCollectionCode = $derived(first?.asset.canonicalMetadata.collectionCode ?? '');
+  const canonicalEntitySlug = $derived(first?.asset.objectKey.split('/')[3] ?? '');
   const relocationPending = $derived(albumItems.reduce((count, item) => count +
     (item.asset.canonicalMetadata.storageRetirementCandidates ?? []).filter((candidate) => candidate.state === 'candidate').length, 0));
   let title = $state(untrack(() => initialItems[0]?.albumTitle ?? ''));
-  let albumArtist = $state(untrack(() => initialItems[0]?.albumArtist ?? initialItems[0]?.creator ?? ''));
+  let creator = $state(untrack(() => initialItems[0]?.creator ?? ''));
+  let albumArtist = $state(untrack(() => initialItems[0]?.albumArtist ?? ''));
+  let entitySlug = $state(untrack(() => initialItems[0]?.asset.objectKey.split('/')[3] ?? ''));
+  let entitySlugTouched = $state(false);
+  let artistCandidates = $state<ArtistCandidate[]>([]);
   let releaseDate = $state(untrack(() => initialItems[0]?.releaseDate ?? ''));
   let label = $state(untrack(() => initialItems[0]?.label ?? ''));
   let catalogNumber = $state(untrack(() => initialItems[0]?.asset.canonicalMetadata.catalogNumber ?? ''));
@@ -97,6 +109,34 @@
 
   const csv = (value: string) => [...new Set(value.split(',').map((entry) => entry.trim()).filter(Boolean))];
 
+  function slug(value: string) {
+    return value.normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toLocaleLowerCase().replace(/[^a-z0-9]+/g, '');
+  }
+
+  function suggestedPersonSlug(value: string) {
+    const words = value.trim().split(/\s+/).filter(Boolean);
+    return slug(words.at(-1) ?? value);
+  }
+
+  async function searchCreators() {
+    if (!entitySlugTouched) entitySlug = suggestedPersonSlug(creator);
+    if (creator.trim().length < 2) { artistCandidates = []; return; }
+    try {
+      const body = await jsonRequest(`/api/metadata/artists?q=${encodeURIComponent(creator)}`, {});
+      artistCandidates = body.artists ?? [];
+    } catch {
+      artistCandidates = [];
+    }
+  }
+
+  function selectCreator(candidate: ArtistCandidate) {
+    creator = candidate.name;
+    const entityName = candidate.sortName.includes(',') ? candidate.sortName.split(',')[0]! : candidate.sortName;
+    entitySlug = slug(entityName);
+    entitySlugTouched = false;
+    artistCandidates = [];
+  }
+
   function addAlbumTag(value: string) {
     const current = csv(albumTags);
     if (!current.some((tag) => tag.toLocaleLowerCase() === value.toLocaleLowerCase())) current.push(value);
@@ -118,6 +158,7 @@
   function albumPayload() {
     return {
       title,
+      creator: creator || null,
       albumArtist: albumArtist || null,
       releaseDate: releaseDate || null,
       label: label || null,
@@ -145,7 +186,11 @@
         body: JSON.stringify(albumPayload())
       });
       acceptItems(body.items);
-      message = 'Saved';
+      if (collectionCode.trim().toUpperCase() !== canonicalCollectionCode || entitySlug.trim() !== canonicalEntitySlug) {
+        await relocateCatalogPath();
+      } else {
+        message = 'Saved';
+      }
     } catch (error) {
       message = error instanceof Error ? error.message : 'Save failed';
     } finally {
@@ -163,6 +208,9 @@
         body: JSON.stringify(albumPayload())
       });
       acceptItems(saved.items);
+      if (collectionCode.trim().toUpperCase() !== canonicalCollectionCode || entitySlug.trim() !== canonicalEntitySlug) {
+        await relocateCatalogPath();
+      }
       let offset = 0;
       let total = albumItems.filter((item) => item.asset.objectKey.toLowerCase().endsWith('.mp3')).length;
       do {
@@ -182,24 +230,24 @@
     }
   }
 
-  async function relocateCollection() {
-    if (!first || !collectionCode.trim()) return;
+  async function relocateCatalogPath() {
+    if (!first || !collectionCode.trim() || !entitySlug.trim()) return;
     busy = true;
-    message = `Copying ${canonicalCollectionCode} → ${collectionCode.toUpperCase()}…`;
+    message = `Copying ${canonicalCollectionCode}/${canonicalEntitySlug} → ${collectionCode.toUpperCase()}/${entitySlug}…`;
     try {
       let remaining = 1;
       let copied = 0;
       while (remaining > 0) {
         const body = await jsonRequest(`/api/albums/${first.albumId}/relocate`, {
           method: 'POST', headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ collectionCode, limit: 3 })
+          body: JSON.stringify({ collectionCode, entitySlug, limit: 3 })
         });
         copied += body.copied;
         remaining = body.remaining;
         acceptItems(body.items);
         message = `Verified ${copied} copies · ${remaining} remaining`;
       }
-      message = `${copied} assets moved logically · old copies retained`;
+      message = `${copied} assets moved logically · old copies retained for reviewed deletion`;
     } catch (error) {
       message = error instanceof Error ? error.message : 'Relocation failed';
     } finally {
@@ -342,6 +390,9 @@
         <h2>Album</h2>
         <div class="grid">
           <label>Title<input bind:value={title} /></label>
+          <label class="artist">Composer / entity<input bind:value={creator} oninput={searchCreators} autocomplete="off" />
+            {#if artistCandidates.length}<div class="suggestions">{#each artistCandidates as artist (artist.id)}<button onclick={() => selectCreator(artist)}>{artist.name}<small>{artist.disambiguation}</small></button>{/each}</div>{/if}
+          </label>
           <label>Album artist<input bind:value={albumArtist} /></label>
           <label>Release<input bind:value={releaseDate} /></label>
           <label>Label<input bind:value={label} /></label>
@@ -349,12 +400,13 @@
           <label>Declared duration<input bind:value={albumDuration} placeholder="MM:SS or HH:MM:SS" /></label>
           <label class="wide-field">Album tags<input bind:value={albumTags} placeholder="opera, contemporary" /></label>
           <label>Collection<input bind:value={collectionCode} placeholder="18, 20E, 20L…" /></label>
+          <label>Entity folder<input bind:value={entitySlug} oninput={() => entitySlugTouched = true} placeholder="schubert" /></label>
           <label class="wide-field">Notes<textarea bind:value={notes} placeholder="Manual notes · Ollama extraction will be available here"></textarea></label>
         </div>
         <div class="duration-compare"><span>DECLARED {albumDuration || '—'}</span><span>ASSETS {formatDuration(localDurationMs)}</span></div>
         <div class="relocation-actions">
-          {#if collectionCode.trim().toUpperCase() !== canonicalCollectionCode}
-            <button onclick={relocateCollection} disabled={busy}>COPY + VERIFY {canonicalCollectionCode} → {collectionCode.trim().toUpperCase()}</button>
+          {#if collectionCode.trim().toUpperCase() !== canonicalCollectionCode || entitySlug.trim() !== canonicalEntitySlug}
+            <button onclick={relocateCatalogPath} disabled={busy}>COPY + VERIFY {canonicalCollectionCode}/{canonicalEntitySlug} → {collectionCode.trim().toUpperCase()}/{entitySlug.trim()}</button>
           {/if}
           {#if relocationPending}<button class="retire" onclick={retireOldCopies} disabled={busy}>DELETE {relocationPending} VERIFIED OLD COPIES</button>{/if}
         </div>
@@ -465,5 +517,6 @@
   .wide-field{grid-column:1/-1}.duration-compare{display:flex;gap:8px;margin-top:10px}.duration-compare span{font-size:9px;color:#7f867b}.roles-section{grid-column:1}.roles{display:grid;gap:6px}.role-row{display:grid;grid-template-columns:1.4fr 1fr .7fr 34px;gap:6px}.role-row input{min-width:0;background:#0d0f0d;color:#fff;border:1px solid #353a32;padding:8px;font:9px ui-monospace,monospace}.role-row button,.descriptors button{border:1px solid #4a5047;background:#111310;color:#fff;font:9px ui-monospace,monospace}.descriptors{grid-column:2;background:#151a14}.descriptors h3{margin:16px 0 7px;color:#7f867b;font-size:9px;text-transform:uppercase}.tag-list{display:flex;flex-wrap:wrap;gap:5px}.tag-list button{padding:6px 8px}.tag-list button.linked{border-color:#c8ff52;color:#c8ff52}.tag-list.legacy button{color:#9b9f98}.descriptors p{font-size:9px;color:#7f867b;line-height:1.5}.canonical-tags button{background:#c8ff52;color:#10110f}.footer-actions{display:flex!important;gap:8px;max-width:none!important}
   .relocation-actions{display:flex;flex-wrap:wrap;gap:7px;margin-top:12px}.relocation-actions button{border:1px solid var(--signal);background:transparent;color:var(--signal);padding:8px;font:9px ui-monospace,monospace}.relocation-actions .retire{border-color:#ff8e78;color:#ff8e78}
   .cover-actions{display:flex;gap:5px}
+  .artist{position:relative}.suggestions{position:absolute;z-index:8;left:0;right:0;top:100%;display:grid;background:#0b0c0b;border:1px solid #41463e}.suggestions button{display:flex;justify-content:space-between;gap:8px;padding:9px;border:0;border-bottom:1px solid #292c27;background:#111310;color:#fff;text-align:left;font:9px ui-monospace,monospace}.suggestions small{font-size:8px;text-align:right}
   @media(max-width:720px){.album-editor>main{display:block}.grid{grid-template-columns:1fr}.album-editor header,.album-editor footer{padding:12px}.album-editor section{padding:14px;border-right:0}.drop{min-height:190px}footer>div{max-width:65%}footer small{display:none}}
 </style>
