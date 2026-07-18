@@ -24,6 +24,7 @@ export interface PlaybackLoop {
 
 export const currentPlayback = writable<PlaybackItem | null>(null);
 export const currentPlaybackTimeMs = writable<number>(0);
+export const playbackIsPlaying = writable<boolean>(false);
 export const playbackMode = writable<PlaybackMode>('continuous');
 export const playbackLoop = writable<PlaybackLoop | null>(null);
 const playbackCatalog = writable<PlaybackContextItem[]>([]);

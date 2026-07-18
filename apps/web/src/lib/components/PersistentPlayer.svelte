@@ -5,6 +5,7 @@
     advancePlayback,
     currentPlayback,
     currentPlaybackTimeMs,
+    playbackIsPlaying,
     playbackLoop,
     playbackMode,
     type PlaybackMode
@@ -34,6 +35,7 @@
     currentTimeMs = audio.currentTime * 1000;
     currentPlaybackTimeMs.set(currentTimeMs);
     isPlaying = !audio.paused;
+    playbackIsPlaying.set(isPlaying);
   }
 
   function handleTimeUpdate() {
@@ -67,6 +69,7 @@
       audio.pause();
       audio.currentTime = endSeconds;
       isPlaying = false;
+      playbackIsPlaying.set(false);
     }
   }
 
@@ -87,6 +90,16 @@
     localStorage.setItem('aby.playback-mode', mode);
   }
 
+  function handlePause() {
+    isPlaying = false;
+    playbackIsPlaying.set(false);
+  }
+
+  function handlePlay() {
+    isPlaying = true;
+    playbackIsPlaying.set(true);
+  }
+
   async function handleEnded() {
     if (!audio) return;
     const loop = $playbackLoop;
@@ -101,6 +114,7 @@
       return;
     }
     isPlaying = false;
+    playbackIsPlaying.set(false);
     const advanced = await advancePlayback().catch(() => false);
     if (advanced) {
       await tick();
@@ -192,8 +206,8 @@
       ontimeupdate={handleTimeUpdate}
       ondurationchange={handleDurationChange}
       onended={handleEnded}
-      onpause={() => isPlaying = false}
-      onplay={() => isPlaying = true}
+      onpause={handlePause}
+      onplay={handlePlay}
       style="display: none;"
     ></audio>
 

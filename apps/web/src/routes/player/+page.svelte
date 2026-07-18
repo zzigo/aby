@@ -10,6 +10,7 @@
     currentPlaybackTimeMs,
     loadPlayback,
     loadSegmentPlayback,
+    playbackIsPlaying,
     setPlaybackCatalog,
     type PlaybackContextItem
   } from '$lib/player';
@@ -170,10 +171,10 @@
   $effect(() => {
     const index = activeLyricIndex;
     const container = lyricsScrollElement;
-    if (index < 0 || !container) return;
+    if (!$playbackIsPlaying || index < 0 || !container) return;
     requestAnimationFrame(() => {
       const active = container.querySelector<HTMLElement>(`[data-lyric-index="${index}"]`);
-      if (active) container.scrollTo({ top: Math.max(0, active.offsetTop - container.clientHeight * .42), behavior: 'smooth' });
+      if (active) container.scrollTo({ top: Math.max(0, active.offsetTop - container.clientHeight * .68), behavior: 'smooth' });
     });
   });
 
@@ -673,8 +674,7 @@
     {/if}
     {#if selected?.hasLyrics}
       <button class:active={lyricsOpen} class="lyrics-toggle" onclick={toggleLyrics} disabled={lyricsLoading} title="Toggle lyrics" aria-label="Toggle lyrics">
-        <svg viewBox="0 0 32 32" aria-hidden="true"><path d="M7 9h18M7 15h14M7 21h10" /><path d="M23 20c0 3-1.8 5-5 5 2.1-1.5 2.8-3 2.8-5H23Z" /></svg>
-        <span>LYRICS</span>
+        L
       </button>
     {/if}
     {#if $currentPlayback}
