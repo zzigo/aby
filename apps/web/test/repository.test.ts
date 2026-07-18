@@ -164,6 +164,34 @@ describe('preview-before-write repository flow', () => {
     }
   });
 
+  test('bulk edits album track names and numbers atomically', async () => {
+    const repository = new MemoryAbyRepository();
+    const collective = fixturePreview();
+    collective.candidateMetadata.tracks = [
+      {
+        objectKey: collective.objectKey, canonicalObjectKey: collective.objectKey,
+        originalFilename: 'feldman - album - 01 - one.wav', checksumSha256: collective.checksumSha256,
+        technicalMetadata: collective.technicalMetadata, recordingTitle: 'feldman - album - 01 - one'
+      },
+      {
+        objectKey: 'aby/aud/demo/two.wav', canonicalObjectKey: 'aby/aud/demo/two.wav',
+        originalFilename: 'feldman - album - 02 - two.wav', checksumSha256: 'b'.repeat(64),
+        technicalMetadata: collective.technicalMetadata, recordingTitle: 'feldman - album - 02 - two'
+      }
+    ];
+    await repository.commitPreview('owner-a', (await repository.savePreview(collective)).id, 'Work', 'One', 'Album', 'Feldman');
+    const initial = await repository.listCatalog('owner-a');
+    const updated = await repository.updateAlbum('owner-a', initial[0]!.albumId!, {
+      title: 'Album',
+      tracks: initial.map((item, index) => ({
+        assetId: item.asset.id,
+        recordingTitle: index === 0 ? 'One' : 'Two',
+        trackNumber: index + 1
+      }))
+    });
+    expect(updated.map((item) => [item.trackNumber, item.recordingTitle])).toEqual([[1, 'One'], [2, 'Two']]);
+  });
+
   test('relocates canonical identity while retaining a verified cleanup candidate', async () => {
     const repository = new MemoryAbyRepository();
     const preview = await repository.savePreview(fixturePreview());

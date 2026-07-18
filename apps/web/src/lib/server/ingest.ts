@@ -122,12 +122,13 @@ export async function inspectWasabiSource(
       : input.entitySlug;
 
     const wikidata = creator ? await fetchWikidataEntity(creator) : null;
-    const parsedMainTrack = parseTrackFilename(basename(sourceObjectKey));
-    const requestedTrack = input.recordingTitle ? parseTrackFilename(`${input.recordingTitle}${extname(sourceObjectKey)}`) : null;
-    const recordingTitle = repairLegacyDiacritics(identification?.recordingTitle || requestedTrack?.title || parsedMainTrack.title || input.workTitle);
     const rawAlbumTitle = identification?.releaseTitle || embeddedAlbumTitle
       || (siblingKeys.length > 1 ? basename(dirname(sourceObjectKey)) : undefined);
     const albumTitle = rawAlbumTitle ? repairLegacyDiacritics(rawAlbumTitle) : undefined;
+    const trackContext = { creator, albumTitle };
+    const parsedMainTrack = parseTrackFilename(basename(sourceObjectKey), trackContext);
+    const requestedTrack = input.recordingTitle ? parseTrackFilename(`${input.recordingTitle}${extname(sourceObjectKey)}`, trackContext) : null;
+    const recordingTitle = repairLegacyDiacritics(identification?.recordingTitle || requestedTrack?.title || parsedMainTrack.title || input.workTitle);
     const releaseDate = identification?.releaseDate || embeddedReleaseDate;
     const alternativeCover = !identification?.cover && albumArtist && albumTitle
       ? await findAlbumArtwork({ creator: albumArtist, albumTitle }).catch((error: unknown) => {
@@ -208,7 +209,7 @@ export async function inspectWasabiSource(
       }
       
       if (siblingInspected) {
-        const parsedTrack = parseTrackFilename(basename(siblingKey));
+        const parsedTrack = parseTrackFilename(basename(siblingKey), trackContext);
         
         const siblingTargetObjectKey = normalizeObjectKey([
           canonicalPrefix.replace(/\/$/, ''),

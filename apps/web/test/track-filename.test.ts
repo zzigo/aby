@@ -20,3 +20,20 @@ test('sanitizes a bare numeric track prefix from editable titles', () => {
   expect(parseTrackTitle('22 track 22')).toEqual({ trackNumber: 22, title: '22' });
   expect(parseTrackTitle('03 — AHI, CHE NON PUR')).toEqual({ trackNumber: 3, title: 'AHI, CHE NON PUR' });
 });
+
+test('removes contextual composer and album prefixes without damaging the track title', () => {
+  expect(parseTrackFilename(
+    'morton feldman - indeterminate music - 13 - durations 5.mp3',
+    { creator: 'Morton Feldman', albumTitle: 'Indeterminate Music' }
+  )).toEqual({ title: 'durations 5', trackNumber: 13, filename: '13-durations 5.mp3' });
+});
+
+test('does not strip a structured prefix when it belongs to another album', () => {
+  expect(parseTrackFilename(
+    'morton feldman - another album - 13 - durations 5.mp3',
+    { creator: 'Morton Feldman', albumTitle: 'Indeterminate Music' }
+  )).toEqual({
+    title: 'morton feldman - another album - 13 - durations 5',
+    filename: 'morton feldman - another album - 13 - durations 5.mp3'
+  });
+});

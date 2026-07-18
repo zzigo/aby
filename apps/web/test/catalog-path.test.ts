@@ -16,3 +16,12 @@ test('relocates collection and creator while repairing legacy track glyphs', () 
     'schubert'
   )).toBe('aby/aud/19/schubert/Winterreise/Winterreise/03-Gefrorne Tränen.mp3');
 });
+
+test('uses edited canonical track names for the destination filename', () => {
+  expect(relocatedCatalogObjectKey(
+    'aby/aud/ens/mortonfeldman/album/release/morton feldman - indeterminate music - 13 - durations 5.mp3',
+    'ens',
+    'mortonfeldman',
+    { recordingTitle: 'durations 5', trackNumber: 13 }
+  )).toBe('aby/aud/ens/mortonfeldman/album/release/13-durations 5.mp3');
+});

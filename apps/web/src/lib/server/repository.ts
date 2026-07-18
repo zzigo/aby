@@ -376,6 +376,10 @@ export class MemoryAbyRepository implements AbyRepository {
   async updateAlbum(ownerId: string, albumId: string, input: AlbumEdit): Promise<CatalogItem[]> {
     const assets = [...this.#assets.values()].filter((asset) => asset.ownerId === ownerId && asset.albumId === albumId);
     if (!assets.length) throw new AbyError('album_not_found', 'Album not found', 404);
+    const trackEdits = new Map(input.tracks?.map((track) => [track.assetId, track]) ?? []);
+    if ([...trackEdits.keys()].some((assetId) => !assets.some((asset) => asset.id === assetId))) {
+      throw new AbyError('album_track_mismatch', 'A track edit does not belong to this album', 409);
+    }
     for (const asset of assets) {
       const albumArtist = input.albumArtist ?? input.creator;
       const releaseFields = albumReleaseFields(input, albumArtist);
@@ -393,6 +397,15 @@ export class MemoryAbyRepository implements AbyRepository {
         albumNotes: releaseFields.albumNotes ?? undefined,
         collectionCode: releaseFields.collectionCode ?? asset.canonicalMetadata.collectionCode
       };
+      const track = trackEdits.get(asset.id);
+      if (track) {
+        const parsed = parseTrackTitle(track.recordingTitle);
+        asset.canonicalMetadata = {
+          ...asset.canonicalMetadata,
+          recordingTitle: parsed.title,
+          trackNumber: track.trackNumber ?? parsed.trackNumber ?? undefined
+        };
+      }
     }
     return (await this.listCatalog(ownerId)).filter((item) => item.albumId === albumId);
   }
@@ -1106,6 +1119,16 @@ export class PostgresAbyRepository implements AbyRepository {
       const albumArtist = input.albumArtist ?? input.creator ?? null;
       const albumMetadata = albumReleaseFields(input, albumArtist);
       const canonicalMetadata = { albumTitle: finalAlbumTitle, ...albumMetadata };
+      const albumTracks = await client.query(
+        `SELECT a.id AS asset_id,r.id AS recording_id,r.metadata AS recording_metadata,a.canonical_metadata
+         FROM aby.assets a JOIN aby.recordings r ON r.id=a.recording_id
+         WHERE r.album_id=$1 AND a.owner_id=$2 AND a.state='active' FOR UPDATE`,
+        [albumId, ownerId]
+      );
+      const rowsByAsset = new Map(albumTracks.rows.map((row) => [row.asset_id as string, row]));
+      if (input.tracks?.some((track) => !rowsByAsset.has(track.assetId))) {
+        throw new AbyError('album_track_mismatch', 'A track edit does not belong to this album', 409);
+      }
       await client.query(
         'UPDATE aby.albums SET title=$1,metadata=jsonb_strip_nulls(metadata || $2::jsonb),updated_at=now() WHERE id=$3 AND owner_id=$4',
         [finalAlbumTitle, albumMetadata, albumId, ownerId]
@@ -1120,6 +1143,21 @@ export class PostgresAbyRepository implements AbyRepository {
          FROM aby.recordings r WHERE a.recording_id=r.id AND r.album_id=$2 AND a.owner_id=$3`,
         [canonicalMetadata, albumId, ownerId]
       );
+      for (const track of input.tracks ?? []) {
+        const row = rowsByAsset.get(track.assetId)!;
+        const parsed = parseTrackTitle(track.recordingTitle);
+        const trackNumber = track.trackNumber ?? parsed.trackNumber ?? null;
+        await client.query(
+          `UPDATE aby.recordings SET title=$1,metadata=jsonb_strip_nulls(metadata || $2::jsonb),updated_at=now()
+           WHERE id=$3 AND owner_id=$4`,
+          [parsed.title, { trackNumber }, row.recording_id, ownerId]
+        );
+        await client.query(
+          `UPDATE aby.assets SET canonical_metadata=jsonb_strip_nulls(canonical_metadata || $1::jsonb),updated_at=now()
+           WHERE id=$2 AND owner_id=$3`,
+          [{ recordingTitle: parsed.title, trackNumber }, track.assetId, ownerId]
+        );
+      }
       await client.query('COMMIT');
     } catch (error) {
       await client.query('ROLLBACK');

@@ -45,7 +45,12 @@ try {
   if (!result.rows.length) throw new Error('Album has no active assets');
   const plan = result.rows.map((row) => ({
     ...row,
-    target: relocatedCatalogObjectKey(row.object_key, collectionCode, entitySlug)
+    target: relocatedCatalogObjectKey(row.object_key, collectionCode, entitySlug, {
+      recordingTitle: String(row.canonical_metadata.recordingTitle ?? ''),
+      ...(Number(row.canonical_metadata.trackNumber) > 0 ? { trackNumber: Number(row.canonical_metadata.trackNumber) } : {}),
+      ...(row.canonical_metadata.creator ? { creator: String(row.canonical_metadata.creator) } : {}),
+      ...(row.canonical_metadata.albumTitle ? { albumTitle: String(row.canonical_metadata.albumTitle) } : {})
+    })
   })).filter((row) => row.target !== row.object_key);
   console.log(JSON.stringify({
     mode: apply ? 'apply' : 'preview', albumId, collectionCode, entitySlug, creator,

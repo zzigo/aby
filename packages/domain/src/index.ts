@@ -390,7 +390,15 @@ export const AlbumEditSchema = z.object({
   styles: z.array(z.string().trim().min(1).max(100)).max(100).optional(),
   roles: z.array(AlbumRoleSchema).max(250).optional(),
   notes: z.string().trim().max(20_000).nullable().optional(),
-  collectionCode: z.string().trim().regex(/^[A-Za-z0-9]{1,8}$/).optional()
+  collectionCode: z.string().trim().regex(/^[A-Za-z0-9]{1,8}$/).optional(),
+  tracks: z.array(z.object({
+    assetId: IdentifierSchema,
+    recordingTitle: z.string().trim().min(1).max(500),
+    trackNumber: z.number().int().positive().nullable().optional()
+  })).max(2_000).refine(
+    (tracks) => new Set(tracks.map((track) => track.assetId)).size === tracks.length,
+    { message: 'Album track edits must use unique asset IDs' }
+  ).optional()
 });
 export type AlbumEdit = z.infer<typeof AlbumEditSchema>;
 

@@ -34,12 +34,26 @@
     disambiguation: string;
   }
 
+  interface TrackNameEdit {
+    assetId: string;
+    recordingTitle: string;
+    trackNumber: number | null;
+    sourceTitle?: string;
+  }
+
   let { items: initialItems, onclose, onsaved }: {
     items: CatalogItem[];
     onclose: () => void;
     onsaved: (items: CatalogItem[]) => void;
   } = $props();
   let albumItems = $state(untrack(() => initialItems));
+  let trackEdits = $state<TrackNameEdit[]>(untrack(() => initialItems.map((item) => ({
+    assetId: item.asset.id,
+    recordingTitle: item.recordingTitle,
+    trackNumber: item.trackNumber ?? null,
+    sourceTitle: item.recordingTitle
+  }))));
+  let bulkNamesOpen = $state(false);
   const first = $derived(albumItems[0]);
   const sourceTags = $derived(first?.asset.technicalMetadata.tags ?? {});
   const sourceTag = (...names: string[]) => {
@@ -88,9 +102,45 @@
     return body;
   }
 
-  function acceptItems(updated: CatalogItem[]) {
+  function acceptItems(updated: CatalogItem[], preserveTrackEdits = true) {
+    const pending = preserveTrackEdits ? new Map(trackEdits.map((track) => [track.assetId, track])) : new Map<string, TrackNameEdit>();
     albumItems = updated;
+    trackEdits = updated.map((item) => pending.get(item.asset.id) ?? {
+      assetId: item.asset.id,
+      recordingTitle: item.recordingTitle,
+      trackNumber: item.trackNumber ?? null,
+      sourceTitle: item.recordingTitle
+    });
     onsaved(updated);
+  }
+
+  function resetTrackNames() {
+    trackEdits = albumItems.map((item) => ({
+      assetId: item.asset.id,
+      recordingTitle: item.recordingTitle,
+      trackNumber: item.trackNumber ?? null,
+      sourceTitle: item.recordingTitle
+    }));
+  }
+
+  async function autoCleanTrackNames() {
+    if (!first) return;
+    busy = true;
+    message = 'Parsing album track names…';
+    try {
+      const body = await jsonRequest(`/api/albums/${first.albumId}/tracks`, {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ creator, albumTitle: title })
+      });
+      trackEdits = body.tracks;
+      bulkNamesOpen = true;
+      const changed = body.tracks.filter((track: { changed: boolean }) => track.changed).length;
+      message = `${changed} of ${body.tracks.length} track names cleaned in preview`;
+    } catch (error) {
+      message = error instanceof Error ? error.message : 'Track-name preview failed';
+    } finally {
+      busy = false;
+    }
   }
 
   function parseDuration(value: string): number | null {
@@ -171,7 +221,12 @@
         ...role, name: role.name.trim(), role: role.role.trim(),
         ...(role.tracks?.trim() ? { tracks: role.tracks.trim() } : { tracks: undefined })
       })),
-      notes: notes || null
+      notes: notes || null,
+      tracks: trackEdits.map((track) => ({
+        assetId: track.assetId,
+        recordingTitle: track.recordingTitle,
+        trackNumber: track.trackNumber || null
+      }))
     };
   }
 
@@ -185,12 +240,9 @@
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify(albumPayload())
       });
-      acceptItems(body.items);
-      if (collectionCode.trim().toUpperCase() !== canonicalCollectionCode || entitySlug.trim() !== canonicalEntitySlug) {
-        await relocateCatalogPath();
-      } else {
-        message = 'Saved';
-      }
+      acceptItems(body.items, false);
+      const relocated = await relocateCatalogPath();
+      if (relocated === 0) message = 'Saved · canonical filenames already clean';
     } catch (error) {
       message = error instanceof Error ? error.message : 'Save failed';
     } finally {
@@ -207,10 +259,8 @@
         method: 'PATCH', headers: { 'content-type': 'application/json' },
         body: JSON.stringify(albumPayload())
       });
-      acceptItems(saved.items);
-      if (collectionCode.trim().toUpperCase() !== canonicalCollectionCode || entitySlug.trim() !== canonicalEntitySlug) {
-        await relocateCatalogPath();
-      }
+      acceptItems(saved.items, false);
+      await relocateCatalogPath();
       let offset = 0;
       let total = albumItems.filter((item) => item.asset.objectKey.toLowerCase().endsWith('.mp3')).length;
       do {
@@ -230,10 +280,10 @@
     }
   }
 
-  async function relocateCatalogPath() {
-    if (!first || !collectionCode.trim() || !entitySlug.trim()) return;
+  async function relocateCatalogPath(): Promise<number | null> {
+    if (!first || !collectionCode.trim() || !entitySlug.trim()) return 0;
     busy = true;
-    message = `Copying ${canonicalCollectionCode}/${canonicalEntitySlug} → ${collectionCode.toUpperCase()}/${entitySlug}…`;
+    message = 'Copying and verifying canonical track paths…';
     try {
       let remaining = 1;
       let copied = 0;
@@ -247,9 +297,13 @@
         acceptItems(body.items);
         message = `Verified ${copied} copies · ${remaining} remaining`;
       }
-      message = `${copied} assets moved logically · old copies retained for reviewed deletion`;
+      message = copied
+        ? `${copied} assets moved logically · old copies retained for reviewed deletion`
+        : 'Canonical filenames already clean';
+      return copied;
     } catch (error) {
       message = error instanceof Error ? error.message : 'Relocation failed';
+      return null;
     } finally {
       busy = false;
     }
@@ -422,12 +476,31 @@
       </section>
 
       <section class="tracks">
-        <div class="section-title"><h2>Tracks</h2><small>Title, number and technical data remain track-specific</small></div>
-        <ol>
-          {#each albumItems as item (item.asset.id)}
-            <li><span>{item.trackNumber ?? '—'}</span><strong>{item.recordingTitle.replace(/^track\s+/i, '')}</strong><small>{item.asset.technicalMetadata.formatName}</small></li>
-          {/each}
-        </ol>
+        <div class="section-title">
+          <div><h2>Tracks</h2><small>Bulk changes are previewed here and saved atomically with the album</small></div>
+          <div class="track-actions">
+            {#if bulkNamesOpen}<button onclick={resetTrackNames} disabled={busy}>Reset</button>{/if}
+            <button onclick={autoCleanTrackNames} disabled={busy}>Auto clean</button>
+            <button onclick={() => bulkNamesOpen = !bulkNamesOpen}>{bulkNamesOpen ? 'Fold' : 'Bulk edit names'}</button>
+          </div>
+        </div>
+        {#if bulkNamesOpen}
+          <div class="track-name-editor">
+            {#each trackEdits as track, index (track.assetId)}
+              <div class="track-name-row">
+                <input class="track-number" type="number" min="1" max="999" bind:value={track.trackNumber} aria-label={`Track ${index + 1} number`} />
+                <input bind:value={track.recordingTitle} aria-label={`Track ${index + 1} title`} />
+                <small>{albumItems.find((item) => item.asset.id === track.assetId)?.asset.technicalMetadata.formatName ?? '—'}</small>
+              </div>
+            {/each}
+          </div>
+        {:else}
+          <ol>
+            {#each albumItems as item (item.asset.id)}
+              <li><span>{item.trackNumber ?? '—'}</span><strong>{item.recordingTitle.replace(/^track\s+/i, '')}</strong><small>{item.asset.technicalMetadata.formatName}</small></li>
+            {/each}
+          </ol>
+        {/if}
       </section>
 
       <section class="roles-section">
@@ -517,6 +590,7 @@
   .wide-field{grid-column:1/-1}.duration-compare{display:flex;gap:8px;margin-top:10px}.duration-compare span{font-size:9px;color:#7f867b}.roles-section{grid-column:1}.roles{display:grid;gap:6px}.role-row{display:grid;grid-template-columns:1.4fr 1fr .7fr 34px;gap:6px}.role-row input{min-width:0;background:#0d0f0d;color:#fff;border:1px solid #353a32;padding:8px;font:9px ui-monospace,monospace}.role-row button,.descriptors button{border:1px solid #4a5047;background:#111310;color:#fff;font:9px ui-monospace,monospace}.descriptors{grid-column:2;background:#151a14}.descriptors h3{margin:16px 0 7px;color:#7f867b;font-size:9px;text-transform:uppercase}.tag-list{display:flex;flex-wrap:wrap;gap:5px}.tag-list button{padding:6px 8px}.tag-list button.linked{border-color:#c8ff52;color:#c8ff52}.tag-list.legacy button{color:#9b9f98}.descriptors p{font-size:9px;color:#7f867b;line-height:1.5}.canonical-tags button{background:#c8ff52;color:#10110f}.footer-actions{display:flex!important;gap:8px;max-width:none!important}
   .relocation-actions{display:flex;flex-wrap:wrap;gap:7px;margin-top:12px}.relocation-actions button{border:1px solid var(--signal);background:transparent;color:var(--signal);padding:8px;font:9px ui-monospace,monospace}.relocation-actions .retire{border-color:#ff8e78;color:#ff8e78}
   .cover-actions{display:flex;gap:5px}
+  .track-actions{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:5px}.track-actions button{border:1px solid #4a5047;background:#111310;color:#fff;padding:7px 9px;font:9px ui-monospace,monospace}.track-name-editor{display:grid;margin-top:12px}.track-name-row{display:grid;grid-template-columns:64px minmax(0,1fr) 48px;gap:7px;padding:6px 0;border-bottom:1px solid #252823}.track-name-row input{min-width:0;background:#111310;color:#fff;border:1px solid #30332e;padding:9px;font:10px ui-monospace,monospace}.track-name-row small{align-self:center;text-align:right}.track-number{text-align:center}
   .artist{position:relative}.suggestions{position:absolute;z-index:8;left:0;right:0;top:100%;display:grid;background:#0b0c0b;border:1px solid #41463e}.suggestions button{display:flex;justify-content:space-between;gap:8px;padding:9px;border:0;border-bottom:1px solid #292c27;background:#111310;color:#fff;text-align:left;font:9px ui-monospace,monospace}.suggestions small{font-size:8px;text-align:right}
   @media(max-width:720px){.album-editor>main{display:block}.grid{grid-template-columns:1fr}.album-editor header,.album-editor footer{padding:12px}.album-editor section{padding:14px;border-right:0}.drop{min-height:190px}footer>div{max-width:65%}footer small{display:none}}
 </style>
