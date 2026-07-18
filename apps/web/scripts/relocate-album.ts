@@ -6,6 +6,7 @@ import pg from 'pg';
 import { sha256File } from '@zztt/aby-media-ingest';
 import { relocatedCatalogObjectKey } from '../src/lib/server/catalog-path';
 import { copyWasabiCanonicalObject, deleteWasabiCanonicalObject, downloadWasabiObject } from '../src/lib/server/storage';
+import { repairLegacyDiacritics } from '../src/lib/server/text-repair';
 
 function argument(name: string) {
   return process.argv.find((value) => value.startsWith(`--${name}=`))?.slice(name.length + 3);
@@ -14,6 +15,7 @@ function argument(name: string) {
 const albumId = argument('album');
 const collectionCode = argument('collection')?.toUpperCase();
 const entitySlug = argument('entity');
+const creator = argument('creator');
 const apply = process.argv.includes('--apply');
 if (!albumId || !collectionCode || !entitySlug) {
   throw new Error('Use --album=<uuid> --collection=<code> --entity=<slug> [--apply]');
@@ -46,7 +48,7 @@ try {
     target: relocatedCatalogObjectKey(row.object_key, collectionCode, entitySlug)
   })).filter((row) => row.target !== row.object_key);
   console.log(JSON.stringify({
-    mode: apply ? 'apply' : 'preview', albumId, collectionCode, entitySlug,
+    mode: apply ? 'apply' : 'preview', albumId, collectionCode, entitySlug, creator,
     assets: result.rows.length, changes: plan.length,
     examples: plan.slice(0, 8).map((row) => ({ source: row.object_key, target: row.target }))
   }, null, 2));
@@ -71,6 +73,7 @@ try {
         ...row.canonical_metadata,
         collectionCode,
         entitySlug,
+        ...(creator ? { creator: repairLegacyDiacritics(creator) } : {}),
         canonicalObjectKey: row.target,
         storageRetirementCandidates: [{
           sourceObjectKey: row.object_key,
@@ -90,6 +93,13 @@ try {
         throw new Error(`Catalog asset changed before relocation: ${row.id}`);
       }
       await rm(localPath, { force: true });
+    }
+    if (creator) {
+      await database.query(
+        `UPDATE aby.albums SET metadata=jsonb_strip_nulls(metadata || $1::jsonb),updated_at=now()
+         WHERE id=$2`,
+        [{ creator: repairLegacyDiacritics(creator) }, albumId]
+      );
     }
   }
 } finally {
