@@ -13,14 +13,14 @@ function argument(name: string) {
 }
 
 const albumId = argument('album');
-const collectionCode = argument('collection')?.toUpperCase();
+const collectionCode = argument('collection');
 const entitySlug = argument('entity');
 const creator = argument('creator');
 const apply = process.argv.includes('--apply');
 if (!albumId || !collectionCode || !entitySlug) {
   throw new Error('Use --album=<uuid> --collection=<code> --entity=<slug> [--apply]');
 }
-if (!/^[A-Z0-9]{1,8}$/.test(collectionCode) || !/^[a-z0-9]+$/.test(entitySlug)) {
+if (!/^[A-Za-z0-9]{1,8}$/.test(collectionCode) || !/^[a-z0-9]+$/.test(entitySlug)) {
   throw new Error('Collection or entity folder is invalid');
 }
 if (!process.env.DATABASE_URL) throw new Error('DATABASE_URL is required');
