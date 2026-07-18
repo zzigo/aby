@@ -56,7 +56,7 @@ describe('Discogs album metadata', () => {
     const fetcher: typeof fetch = (async (input) => {
       const url = new URL(String(input));
       calls.push(url);
-      if (url.pathname.endsWith('/database/search') && url.searchParams.has('artist')) {
+      if (url.pathname.endsWith('/database/search') && !url.searchParams.has('q')) {
         return Response.json({ results: [] });
       }
       if (url.pathname.endsWith('/database/search')) {
@@ -75,8 +75,9 @@ describe('Discogs album metadata', () => {
       creator: 'Jean Luc Barriere', albumTitle: '100 Objects to Represent the W', year: '1997'
     }, { fetcher });
 
-    expect(calls).toHaveLength(3);
+    expect(calls).toHaveLength(4);
     expect(calls[1]?.searchParams.get('artist')).toBeNull();
+    expect(calls[2]?.searchParams.get('q')).toBe('100 objects represent');
     expect(result).toMatchObject({ id: '6685489', creator: 'Jean-Baptiste Barrière' });
   });
 });

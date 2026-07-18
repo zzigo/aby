@@ -175,12 +175,23 @@ export async function searchDiscogsRelease(
   const year = input.year?.match(/(?:18|19|20)\d{2}/)?.[0];
   if (year) searchUrl.searchParams.set('year', year);
 
+  let broadQueryTokens: string[] = [];
   let search = await discogsJson<{ results?: DiscogsSearchResult[] }>(fetcher, searchUrl);
   if (!(search.results ?? []).some((candidate) => candidate.type === 'release')) {
     // Embedded artist tags are frequently missing or damaged. Keep the title/year
     // as the stable release query and let the user review the resulting candidate.
     searchUrl.searchParams.delete('artist');
     search = await discogsJson<{ results?: DiscogsSearchResult[] }>(fetcher, searchUrl);
+  }
+  if (!(search.results ?? []).some((candidate) => candidate.type === 'release')) {
+    const stopWords = new Set(['the', 'and', 'for', 'with', 'from', 'into', 'that', 'this', 'to', 'of', 'a', 'an', 'by', 'in', 'on']);
+    broadQueryTokens = normalize(albumTitle).split(' ')
+      .filter((token) => token.length >= 3 && !stopWords.has(token));
+    if (broadQueryTokens.length >= 2) {
+      searchUrl.searchParams.delete('release_title');
+      searchUrl.searchParams.set('q', broadQueryTokens.join(' '));
+      search = await discogsJson<{ results?: DiscogsSearchResult[] }>(fetcher, searchUrl);
+    }
   }
   const creatorKey = normalize(creator);
   const titleKey = normalize(albumTitle);
@@ -190,7 +201,10 @@ export async function searchDiscogsRelease(
     return normalize(candidateCreator).includes(creatorKey)
       && normalize(candidateTitle.join(' - ')) === titleKey;
   });
-  const selected = exact ?? candidates[0];
+  const broadMatch = broadQueryTokens.length
+    ? candidates.find((candidate) => broadQueryTokens.every((token) => normalize(candidate.title).includes(token)))
+    : undefined;
+  const selected = exact ?? broadMatch ?? (broadQueryTokens.length ? undefined : candidates[0]);
   if (!selected) return null;
 
   const releaseUrl = new URL(`${config.DISCOGS_BASE_URL.replace(/\/+$/, '')}/releases/${selected.id}`);
