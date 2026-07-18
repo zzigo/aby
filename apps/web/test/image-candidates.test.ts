@@ -19,3 +19,11 @@ test('manual cover remains authoritative across service refreshes', () => {
   expect(merged).toHaveLength(3);
   expect(preferredCoverCandidate(merged)).toEqual(manual);
 });
+
+test('uses a feature image when an album has no explicit cover candidate', () => {
+  const feature = {
+    authority: 'cover-art-archive', url: 'https://coverartarchive.org/release/example/cover.jpg', kind: 'feature' as const,
+    exactRelease: false, sourceId: '45503068818', provenance: {}
+  };
+  expect(preferredCoverCandidate([feature])).toEqual(feature);
+});

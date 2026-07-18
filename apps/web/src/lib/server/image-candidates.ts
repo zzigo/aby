@@ -16,7 +16,9 @@ export function sortImageCandidates(candidates: ImageCandidate[] = []): ImageCan
 }
 
 export function preferredCoverCandidate(candidates: ImageCandidate[] = []): ImageCandidate | undefined {
-  return sortImageCandidates(candidates).find((candidate) => candidate.kind === 'cover');
+  const sorted = sortImageCandidates(candidates);
+  return sorted.find((candidate) => candidate.kind === 'cover')
+    ?? sorted.find((candidate) => candidate.kind === 'feature');
 }
 
 export function preferredCoverUrl(candidates: ImageCandidate[] = []): string | undefined {
