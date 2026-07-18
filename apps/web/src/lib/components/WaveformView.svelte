@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { Asset } from '@zztt/aby-domain';
-  import { currentPlayback, currentPlaybackTimeMs, playbackLoop } from '$lib/player';
+  import { currentPlayback, currentPlaybackTimeMs } from '$lib/player';
   import { formatDuration } from '$lib/presentation';
 
   let { asset }: { asset: Asset } = $props();
@@ -10,11 +10,12 @@
   let container = $state<HTMLElement | null>(null);
   let inMs = $state<number | null>(null);
   let outMs = $state<number | null>(null);
+  let regionStartMs = $state<number | null>(null);
+  let regionDrawing = $state(false);
   let drag = $state<null | { kind: 'in' | 'out' | 'range'; anchorMs: number; startMs: number; endMs: number }>(null);
   let seekDragging = $state(false);
   let cursorMs = $state(0);
   let feedback = $state('');
-  let tapTimer: ReturnType<typeof setTimeout> | undefined;
   const durationMs = $derived(asset.technicalMetadata.durationMs);
   const inPercent = $derived(inMs === null || durationMs <= 0 ? 0 : inMs / durationMs * 100);
   const outPercent = $derived(outMs === null || durationMs <= 0 ? 0 : outMs / durationMs * 100);
@@ -31,7 +32,6 @@
     inMs = null;
     outMs = null;
     cursorMs = 0;
-    if ($playbackLoop?.assetId === assetId) playbackLoop.set(null);
     void fetch(`/api/assets/${assetId}/waveform`, { method: 'POST', signal: controller.signal })
       .then(async (response) => {
         const body = await response.json();
@@ -53,37 +53,58 @@
     return Math.round(Math.max(0, Math.min(1, (clientX - rect.left) / rect.width)) * durationMs);
   }
 
-  function applyLoop(start: number, end: number) {
+  function applyRegion(start: number, end: number) {
     inMs = Math.max(0, Math.min(start, end - 100));
     outMs = Math.min(durationMs, Math.max(end, inMs + 100));
-    playbackLoop.set({ assetId: asset.id, startTimeMs: inMs, endTimeMs: outMs });
-  }
-
-  function singleTap(clientX: number) {
-    const value = timeAt(clientX);
-    if (inMs === null || outMs !== null) {
-      inMs = value;
-      outMs = null;
-      playbackLoop.set(null);
-      return;
-    }
-    applyLoop(Math.min(inMs, value), Math.max(inMs, value));
-  }
-
-  function handleTap(event: MouseEvent) {
-    clearTimeout(tapTimer);
-    if (event.detail > 1) {
-      clearSelection();
-      return;
-    }
-    tapTimer = setTimeout(() => singleTap(event.clientX), 220);
   }
 
   function clearSelection() {
-    clearTimeout(tapTimer);
     inMs = null;
     outMs = null;
-    playbackLoop.set(null);
+    regionStartMs = null;
+    regionDrawing = false;
+  }
+
+  function startRegion(event: PointerEvent) {
+    event.preventDefault();
+    event.stopPropagation();
+    const value = timeAt(event.clientX);
+    (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
+    regionStartMs = value;
+    regionDrawing = true;
+    inMs = value;
+    outMs = null;
+  }
+
+  function moveRegion(event: PointerEvent) {
+    if (drag) {
+      moveDrag(event);
+      return;
+    }
+    if (!regionDrawing || regionStartMs === null) return;
+    const value = timeAt(event.clientX);
+    if (Math.abs(value - regionStartMs) < 100) return;
+    applyRegion(Math.min(regionStartMs, value), Math.max(regionStartMs, value));
+  }
+
+  function endRegion(event: PointerEvent) {
+    if (drag) {
+      endDrag(event);
+      return;
+    }
+    if (!regionDrawing) return;
+    const target = event.currentTarget as HTMLElement;
+    if (target.hasPointerCapture(event.pointerId)) target.releasePointerCapture(event.pointerId);
+    const value = timeAt(event.clientX);
+    const start = regionStartMs;
+    regionDrawing = false;
+    regionStartMs = null;
+    if (start === null || Math.abs(value - start) < 100) {
+      inMs = null;
+      outMs = null;
+      return;
+    }
+    applyRegion(Math.min(start, value), Math.max(start, value));
   }
 
   function startDrag(event: PointerEvent, kind: 'in' | 'out' | 'range') {
@@ -97,12 +118,12 @@
   function moveDrag(event: PointerEvent) {
     if (!drag) return;
     const value = timeAt(event.clientX);
-    if (drag.kind === 'in') applyLoop(Math.min(value, drag.endMs - 100), drag.endMs);
-    else if (drag.kind === 'out') applyLoop(drag.startMs, Math.max(value, drag.startMs + 100));
+    if (drag.kind === 'in') applyRegion(Math.min(value, drag.endMs - 100), drag.endMs);
+    else if (drag.kind === 'out') applyRegion(drag.startMs, Math.max(value, drag.startMs + 100));
     else {
       const length = drag.endMs - drag.startMs;
       const nextStart = Math.max(0, Math.min(durationMs - length, drag.startMs + value - drag.anchorMs));
-      applyLoop(nextStart, nextStart + length);
+      applyRegion(nextStart, nextStart + length);
     }
   }
 
@@ -157,7 +178,7 @@
   <div bind:this={container} class="waveform">
     {#if waveformUrl}<img src={waveformUrl} alt={`Waveform for ${asset.canonicalMetadata.recordingTitle}`} />
     {:else}<div class:pending class="waveform-grid"></div>{/if}
-    <div class="region-lane" onpointermove={moveDrag} onpointerup={endDrag} onpointercancel={endDrag} onclick={handleTap} ondblclick={clearSelection} onkeydown={(event) => { if (event.key === 'Escape') clearSelection(); }} role="button" tabindex="0" aria-label="Select waveform region">
+    <div class="region-lane" onpointerdown={startRegion} onpointermove={moveRegion} onpointerup={endRegion} onpointercancel={endRegion} ondblclick={clearSelection} onkeydown={(event) => { if (event.key === 'Escape') clearSelection(); }} role="button" tabindex="0" aria-label="Drag to select waveform region">
       {#if inMs !== null}<span class="marker in" style={`left:${inPercent}%`}>IN</span>{/if}
       {#if outMs !== null}<span class="marker out" style={`left:${outPercent}%`}>OUT</span>{/if}
       {#if inMs !== null && outMs !== null}

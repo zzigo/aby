@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { page } from '$app/state';
   import { onMount } from 'svelte';
   import { SvelteMap } from 'svelte/reactivity';
   import type { CatalogItem, CatalogSegment } from '@zztt/aby-domain';
@@ -10,16 +11,14 @@
     loadPlayback,
     loadSegmentPlayback,
     setPlaybackCatalog,
-    stepPlayback,
     type PlaybackContextItem
   } from '$lib/player';
   import SpectrogramView from '$lib/components/SpectrogramView.svelte';
   import WaveformView from '$lib/components/WaveformView.svelte';
   import TrackEditor from '$lib/components/TrackEditor.svelte';
   import AlbumEditor from '$lib/components/AlbumEditor.svelte';
-  import GalleryView from '$lib/components/GalleryView.svelte';
 
-  const views = ['Cover', 'Waveform', 'Spectrogram', 'Gallery'] as const;
+  const views = ['Cover', 'Waveform', 'Spectrogram'] as const;
   type CatalogMode = 'album' | 'work' | 'creator' | 'folder' | 'tag';
   let { data }: { data: PageData } = $props();
   let items = $state<CatalogItem[]>([]);
@@ -134,6 +133,26 @@
     return [...groups.values()].map((group) => ({ ...group, items: sortTracks(group.items) }))
       .sort((left, right) => left.title.localeCompare(right.title));
   });
+  const navigationAlbums = $derived.by(() => {
+    const groups = new SvelteMap<string, { id: string; title: string; items: CatalogItem[] }>();
+    for (const item of items) {
+      const id = item.albumId ?? `work:${item.asset.workId}`;
+      let group = groups.get(id);
+      if (!group) {
+        group = { id, title: item.albumTitle ?? item.workTitle, items: [] };
+        groups.set(id, group);
+      }
+      group.items.push(item);
+    }
+    return [...groups.values()]
+      .map((group) => ({ ...group, items: sortTracks(group.items) }))
+      .sort((left, right) => left.title.localeCompare(right.title));
+  });
+  const selectedAlbumId = $derived(selected ? selected.albumId ?? `work:${selected.asset.workId}` : '');
+  const selectedAlbumIndex = $derived(navigationAlbums.findIndex((album) => album.id === selectedAlbumId));
+  const selectedAlbumItems = $derived(selectedAlbumIndex >= 0 ? navigationAlbums[selectedAlbumIndex]?.items ?? [] : []);
+  const selectedAssetId = $derived(selected?.asset.id ?? '');
+  const selectedTrackIndex = $derived(selectedAssetId ? selectedAlbumItems.findIndex((item) => item.asset.id === selectedAssetId) : -1);
 
   function nestedGroups(source: CatalogItem[], parentTitle: (item: CatalogItem) => string, childTitle: (item: CatalogItem) => string) {
     const parents = new SvelteMap<string, { id: string; title: string; children: SvelteMap<string, { id: string; title: string; items: CatalogItem[] }> }>();
@@ -199,7 +218,14 @@
       if (!response.ok) throw new Error(body.error?.message ?? 'Catalog could not be loaded');
       items = body.items;
       syncPlaybackCatalog(items);
-      selected = items.find((item) => item.asset.id === $currentPlayback?.assetId) ?? items[0] ?? null;
+      const navigationState = page.state as { assetId?: unknown };
+      const requestedAssetId = typeof navigationState.assetId === 'string'
+        ? navigationState.assetId
+        : new URL(window.location.href).searchParams.get('asset');
+      selected = items.find((item) => item.asset.id === requestedAssetId)
+        ?? items.find((item) => item.asset.id === $currentPlayback?.assetId)
+        ?? items[0]
+        ?? null;
       try {
         const storedFavorites: unknown = JSON.parse(localStorage.getItem(`aby.favorite-folders:${storageSuffix}`) ?? '[]');
         const storedRecents: unknown = JSON.parse(localStorage.getItem(`aby.recent-folders:${storageSuffix}`) ?? '[]');
@@ -262,12 +288,14 @@
     viewIndex = (viewIndex + direction + views.length) % views.length;
   }
 
-  async function stepTrack(direction: -1 | 1) {
-    coverFlipped = false;
-    await stepPlayback(direction).catch((error) => {
-      message = error instanceof Error ? error.message : 'Track navigation failed';
-      return false;
-    });
+  async function navigateTrack(direction: -1 | 1) {
+    const target = selectedAlbumItems[selectedTrackIndex + direction];
+    if (target) await playItem(target);
+  }
+
+  async function navigateAlbum(direction: -1 | 1) {
+    const target = navigationAlbums[selectedAlbumIndex + direction]?.items[0];
+    if (target) await playItem(target);
   }
 
   function startViewGesture(event: TouchEvent) {
@@ -307,12 +335,6 @@
     } catch (error) {
       message = error instanceof Error ? error.message : 'Playback failed';
     }
-  }
-
-  function selectFromGallery(item: CatalogItem) {
-    selected = item;
-    coverFlipped = false;
-    viewIndex = 0;
   }
 
   async function playSegment(item: CatalogItem, segment: CatalogSegment) {
@@ -495,7 +517,7 @@
   <meta name="description" content="A touch-first catalog and temporal media instrument." />
 </svelte:head>
 
-<main class:transport-active={Boolean($currentPlayback)} class:signal-active={viewIndex === 1 || viewIndex === 2} class:gallery-active={viewIndex === 3} class="instrument-shell">
+<main class:transport-active={Boolean($currentPlayback)} class:signal-active={viewIndex === 1 || viewIndex === 2} class="instrument-shell">
   <section class="instrument-stage" ontouchstart={startViewGesture} ontouchend={endViewGesture} aria-label={`${views[viewIndex]} visualization`}>
     {#if message}<div class="instrument-status">{message}</div>{/if}
 
@@ -534,8 +556,6 @@
         <WaveformView asset={selected.asset} />
       {:else if viewIndex === 2}
         <SpectrogramView asset={selected.asset} onplay={() => playItem(selected!)} />
-      {:else}
-        <GalleryView {items} onselect={selectFromGallery} />
       {/if}
     {:else if loading}
       <div class="instrument-empty">Opening the instrument…</div>
@@ -546,10 +566,18 @@
     <button class="view-arrow previous" onclick={() => selectView(-1)} aria-label="Previous visualization">←</button>
     <button class="view-arrow next" onclick={() => selectView(1)} aria-label="Next visualization">→</button>
     {#if selected && viewIndex === 0}
-      <button class="track-edge previous-track" onclick={() => stepTrack(-1)} aria-label="Previous track"></button>
-      <button class="track-edge next-track" onclick={() => stepTrack(1)} aria-label="Next track"></button>
+      <button class="track-edge previous-track" onclick={() => navigateTrack(-1)} disabled={selectedTrackIndex <= 0} aria-label="Previous track"></button>
+      <button class="track-edge next-track" onclick={() => navigateTrack(1)} disabled={selectedTrackIndex < 0 || selectedTrackIndex >= selectedAlbumItems.length - 1} aria-label="Next track"></button>
     {/if}
-    {#if $currentPlayback && viewIndex !== 3}
+    {#if selected}
+      <nav class="context-navigation" aria-label="Album and track navigation">
+        <button onclick={() => navigateAlbum(-1)} disabled={selectedAlbumIndex <= 0} title="Previous album" aria-label="Previous album">‹ ALB</button>
+        <button onclick={() => navigateTrack(-1)} disabled={selectedTrackIndex <= 0} title="Previous track" aria-label="Previous track">‹ TRK</button>
+        <button onclick={() => navigateTrack(1)} disabled={selectedTrackIndex < 0 || selectedTrackIndex >= selectedAlbumItems.length - 1} title="Next track" aria-label="Next track">TRK ›</button>
+        <button onclick={() => navigateAlbum(1)} disabled={selectedAlbumIndex < 0 || selectedAlbumIndex >= navigationAlbums.length - 1} title="Next album" aria-label="Next album">ALB ›</button>
+      </nav>
+    {/if}
+    {#if $currentPlayback}
       <button 
         class="master-capture-btn" 
         onpointerdown={handlePointerDown} 
@@ -667,4 +695,6 @@
   .catalog-items article{position:relative;overflow:hidden;touch-action:pan-y}.catalog-primary{position:relative;z-index:1;padding-right:68px;transition:transform .16s ease;background:var(--surface)}.actions-open .catalog-primary{transform:translateX(92px)}
   .item-actions{position:absolute;inset:0 auto 0 0;width:92px;display:grid;grid-template-columns:1fr 1fr;background:var(--signal)}.item-actions button{border:0;border-right:1px solid #1c2117;background:transparent;color:#10110f;font-size:20px}
   .catalog-edit{position:absolute;z-index:2;top:50%;right:12px;width:38px;height:38px;padding:0;transform:translateY(-50%);border:0;background:transparent;color:var(--muted);font-size:17px}.catalog-edit:hover,.catalog-edit:focus-visible{color:var(--signal)}.actions-open .catalog-edit{pointer-events:none;opacity:0}
+  .context-navigation{position:absolute;z-index:14;bottom:122px;left:24px;display:flex;gap:2px}.context-navigation button{height:34px;min-width:52px;padding:0 8px;border:0;background:#101110cc;color:var(--muted);font:8px ui-monospace,monospace;letter-spacing:.08em}.context-navigation button:not(:disabled):hover,.context-navigation button:not(:disabled):focus-visible{color:var(--signal)}
+  @media(max-width:600px){.context-navigation{bottom:130px;left:10px}.context-navigation button{min-width:48px;padding:0 6px}}
 </style>
