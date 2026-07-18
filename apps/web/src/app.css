@@ -77,6 +77,7 @@ audio { display: none; }
 
 .instrument-shell { position: relative; width: 100%; min-height: calc(100svh - 64px); margin: 0; padding: 0; overflow: hidden; background: #0c0d0c; }
 .instrument-stage { position: relative; min-height: calc(100svh - 64px); display: grid; place-items: center; padding: 0 52px 60px; touch-action: pan-y; overflow: hidden; }
+.signal-active .instrument-stage { padding-right: 0; padding-left: 0; }
 .instrument-status { position: absolute; z-index: 4; top: 14px; left: 18px; max-width: calc(100% - 36px); color: #ff8e78; font: 11px ui-monospace,monospace; }
 .cover-view { width: min(1180px, 92vw); display: grid; grid-template-columns: minmax(280px, 68vh) minmax(260px, 1fr); gap: clamp(28px, 7vw, 110px); align-items: center; perspective:1400px; }
 .cover-flip { position: relative; aspect-ratio: 1; width: 100%; transform-style: preserve-3d; transition: transform .5s cubic-bezier(.2,.75,.2,1); }
@@ -100,7 +101,7 @@ audio { display: none; }
 .view-switcher { position: absolute; z-index: 19; left: 50%; bottom: 70px; transform: translateX(-50%); display: flex; gap: 4px; padding: 0; border: 0; background: #101110cc; }
 .view-switcher button { min-height: 40px; padding: 8px 13px; background: transparent; color: var(--muted); border: 0; text-transform: uppercase; letter-spacing: .1em; font-size: 9px; }
 .view-switcher button.active { background: transparent; color: var(--signal); }
-.spectrogram-view { width: calc(100vw - 104px); height: calc(100svh - 212px); display: grid; grid-template-rows: minmax(0,1fr) 76px; gap: 0; }
+.spectrogram-view { width: 100vw; height: calc(100svh - 212px); display: grid; grid-template-rows: minmax(0,1fr) 76px; gap: 0; }
 .spectrogram-canvas { position: relative; width: 100%; min-height: 0; padding: 0; overflow: hidden; border: 0; background: #090a09; color: #fff; }
 .spectrogram-canvas img { width: 100%; height: 100%; display: block; object-fit: fill; filter: saturate(.7) contrast(1.18); }
 .spectral-grid { position: absolute; inset: 0; opacity: .42; background-image: linear-gradient(#30322f 1px, transparent 1px),linear-gradient(90deg,#30322f 1px,transparent 1px); background-size: 100% 12.5%, 8.333% 100%; }
@@ -168,6 +169,7 @@ audio { display: none; }
   .persistent-player { left: 8px; right: 8px; bottom: 8px; grid-template-columns: 1fr; gap: 10px; padding: 13px; }
   .persistent-player.instrument-mode { left: 0; right: 0; bottom: 0; min-height: 72px; padding: 8px 12px; }
   .instrument-stage { min-height: calc(100svh - 64px); padding: 0 18px 72px; }
+  .signal-active .instrument-stage { padding-right: 0; padding-left: 0; }
   .cover-view { width: min(88vw, 620px); grid-template-columns: 1fr; gap: 24px; }
   .cover-flip { width: min(74vw, 48vh); justify-self: center; }
   .instrument-copy { text-align: center; }
@@ -177,7 +179,7 @@ audio { display: none; }
   .view-arrow.previous { left: 4px; }
   .view-arrow.next { right: 4px; }
   .view-switcher { bottom: 62px; }
-  .spectrogram-view { width: calc(100vw - 36px); height: calc(100svh - 184px); grid-template-rows: minmax(0,1fr) 110px; }
+  .spectrogram-view { width: 100vw; height: calc(100svh - 184px); grid-template-rows: minmax(0,1fr) 110px; }
   .descriptor-strip { grid-template-columns: repeat(5,minmax(62px,1fr)); overflow-x: auto; }
   .descriptor-strip div { min-height: 110px; padding: 10px 8px; grid-template-columns: 1fr; align-content: center; }
   .catalog-drawer { height: min(70svh,680px); }

@@ -3,7 +3,7 @@
   import { currentPlayback, currentPlaybackTimeMs, playbackLoop } from '$lib/player';
   import { formatDuration } from '$lib/presentation';
 
-  let { asset, onplay }: { asset: Asset; onplay: () => void | Promise<void> } = $props();
+  let { asset }: { asset: Asset } = $props();
   let waveformUrl = $state('');
   let pending = $state(true);
   let failure = $state('');
@@ -11,12 +11,15 @@
   let inMs = $state<number | null>(null);
   let outMs = $state<number | null>(null);
   let drag = $state<null | { kind: 'in' | 'out' | 'range'; anchorMs: number; startMs: number; endMs: number }>(null);
+  let seekDragging = $state(false);
+  let cursorMs = $state(0);
   let feedback = $state('');
   let tapTimer: ReturnType<typeof setTimeout> | undefined;
   const durationMs = $derived(asset.technicalMetadata.durationMs);
   const inPercent = $derived(inMs === null || durationMs <= 0 ? 0 : inMs / durationMs * 100);
   const outPercent = $derived(outMs === null || durationMs <= 0 ? 0 : outMs / durationMs * 100);
-  const playheadPercent = $derived($currentPlayback?.assetId === asset.id && durationMs > 0 ? $currentPlaybackTimeMs / durationMs * 100 : 0);
+  const playheadMs = $derived($currentPlayback?.assetId === asset.id ? $currentPlaybackTimeMs : cursorMs);
+  const playheadPercent = $derived(durationMs > 0 ? playheadMs / durationMs * 100 : 0);
 
   $effect(() => {
     const assetId = asset.id;
@@ -27,6 +30,7 @@
     failure = '';
     inMs = null;
     outMs = null;
+    cursorMs = 0;
     if ($playbackLoop?.assetId === assetId) playbackLoop.set(null);
     void fetch(`/api/assets/${assetId}/waveform`, { method: 'POST', signal: controller.signal })
       .then(async (response) => {
@@ -64,7 +68,6 @@
       return;
     }
     applyLoop(Math.min(inMs, value), Math.max(inMs, value));
-    void onplay();
   }
 
   function handleTap(event: MouseEvent) {
@@ -110,6 +113,35 @@
     drag = null;
   }
 
+  function seekTo(clientX: number) {
+    const value = timeAt(clientX);
+    cursorMs = value;
+    if ($currentPlayback?.assetId !== asset.id) return;
+    const audio = document.querySelector<HTMLAudioElement>('.persistent-player audio');
+    if (!audio) return;
+    audio.currentTime = value / 1000;
+    currentPlaybackTimeMs.set(value);
+  }
+
+  function startSeek(event: PointerEvent) {
+    event.preventDefault();
+    event.stopPropagation();
+    (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
+    seekDragging = true;
+    seekTo(event.clientX);
+  }
+
+  function moveSeek(event: PointerEvent) {
+    if (seekDragging) seekTo(event.clientX);
+  }
+
+  function endSeek(event: PointerEvent) {
+    if (!seekDragging) return;
+    const target = event.currentTarget as HTMLElement;
+    if (target.hasPointerCapture(event.pointerId)) target.releasePointerCapture(event.pointerId);
+    seekDragging = false;
+  }
+
   async function saveSegment() {
     if (inMs === null || outMs === null) return;
     const response = await fetch('/api/segments', {
@@ -122,17 +154,21 @@
 </script>
 
 <div class="waveform-view" ontouchstart={(event) => event.stopPropagation()} ontouchend={(event) => event.stopPropagation()} role="region" aria-label="Waveform">
-  <div bind:this={container} class="waveform" onpointermove={moveDrag} onpointerup={endDrag} onpointercancel={endDrag} onclick={handleTap} ondblclick={clearSelection} onkeydown={(event) => { if (event.key === 'Escape') clearSelection(); }} role="button" tabindex="0" aria-label="Waveform segment loop editor">
+  <div bind:this={container} class="waveform">
     {#if waveformUrl}<img src={waveformUrl} alt={`Waveform for ${asset.canonicalMetadata.recordingTitle}`} />
     {:else}<div class:pending class="waveform-grid"></div>{/if}
-    {#if inMs !== null}<span class="marker in" style={`left:${inPercent}%`}>IN</span>{/if}
-    {#if outMs !== null}<span class="marker out" style={`left:${outPercent}%`}>OUT</span>{/if}
-    {#if inMs !== null && outMs !== null}
-      <button class="selection" style={`left:${inPercent}%;width:${outPercent - inPercent}%`} onpointerdown={(event) => startDrag(event, 'range')} onclick={(event) => event.stopPropagation()} aria-label="Drag loop selection"></button>
-      <button class="handle in-handle" style={`left:${inPercent}%`} onpointerdown={(event) => startDrag(event, 'in')} onclick={(event) => event.stopPropagation()} aria-label="Move loop in point"></button>
-      <button class="handle out-handle" style={`left:${outPercent}%`} onpointerdown={(event) => startDrag(event, 'out')} onclick={(event) => event.stopPropagation()} aria-label="Move loop out point"></button>
-    {/if}
-    {#if $currentPlayback?.assetId === asset.id}<span class="playhead" style={`left:${playheadPercent}%`}></span>{/if}
+    <div class="region-lane" onpointermove={moveDrag} onpointerup={endDrag} onpointercancel={endDrag} onclick={handleTap} ondblclick={clearSelection} onkeydown={(event) => { if (event.key === 'Escape') clearSelection(); }} role="button" tabindex="0" aria-label="Select waveform region">
+      {#if inMs !== null}<span class="marker in" style={`left:${inPercent}%`}>IN</span>{/if}
+      {#if outMs !== null}<span class="marker out" style={`left:${outPercent}%`}>OUT</span>{/if}
+      {#if inMs !== null && outMs !== null}
+        <button class="selection" style={`left:${inPercent}%;width:${outPercent - inPercent}%`} onpointerdown={(event) => startDrag(event, 'range')} onclick={(event) => event.stopPropagation()} aria-label="Drag loop selection"></button>
+        <button class="handle in-handle" style={`left:${inPercent}%`} onpointerdown={(event) => startDrag(event, 'in')} onclick={(event) => event.stopPropagation()} aria-label="Move loop in point"></button>
+        <button class="handle out-handle" style={`left:${outPercent}%`} onpointerdown={(event) => startDrag(event, 'out')} onclick={(event) => event.stopPropagation()} aria-label="Move loop out point"></button>
+      {/if}
+    </div>
+    <div class="transport-lane" onpointerdown={startSeek} onpointermove={moveSeek} onpointerup={endSeek} onpointercancel={endSeek} role="slider" tabindex="0" aria-label="Waveform playback cursor" aria-valuemin="0" aria-valuemax={durationMs} aria-valuenow={playheadMs}></div>
+    <span class="midline"></span>
+    <span class="playhead" style={`left:${playheadPercent}%`}></span>
     <span class="clock start">00:00</span><span class="clock end">{formatDuration(durationMs)}</span>
   </div>
   <div class="waveform-footer">
@@ -144,5 +180,5 @@
 </div>
 
 <style>
-  .waveform-view{width:100%;height:100%;display:grid;grid-template-rows:1fr 34px;background:#090a09}.waveform{position:relative;min-height:0;overflow:hidden;touch-action:none;user-select:none}.waveform img{width:100%;height:100%;display:block;object-fit:fill;opacity:.88}.waveform-grid{position:absolute;inset:0;background:repeating-linear-gradient(90deg,#1b1d1a 0 1px,transparent 1px 8.333%),linear-gradient(#171916,#0a0b0a)}.waveform-grid.pending{animation:pulse 1.2s ease-in-out infinite alternate}.selection{position:absolute;top:0;bottom:0;border:0;border-left:1px solid var(--signal);border-right:1px solid var(--signal);background:#c6ff5224;cursor:grab}.handle{position:absolute;top:0;bottom:0;width:28px;transform:translateX(-50%);border:0;background:transparent;cursor:ew-resize;z-index:3}.marker{position:absolute;top:10px;transform:translateX(-50%);z-index:4;color:var(--signal);font:8px ui-monospace,monospace}.playhead{position:absolute;top:0;bottom:0;width:1px;background:#fff;box-shadow:0 0 8px #fff;pointer-events:none;z-index:5}.clock{position:absolute;bottom:8px;color:var(--muted);font:9px ui-monospace,monospace}.clock.start{left:9px}.clock.end{right:9px}.waveform-footer{display:flex;align-items:center;gap:12px;padding:0 12px;border-top:1px solid var(--line);color:var(--muted);font:9px ui-monospace,monospace}.waveform-footer button{margin-left:auto;border:0;background:transparent;color:var(--signal);font:inherit}.failure{color:#ff8e78}@keyframes pulse{to{opacity:.45}}
+  .waveform-view{width:100%;height:100%;display:grid;grid-template-rows:1fr 34px;background:#090a09}.waveform{position:relative;min-height:0;overflow:hidden;touch-action:none;user-select:none}.waveform img{width:100%;height:100%;display:block;object-fit:fill;opacity:.88}.waveform-grid{position:absolute;inset:0;background:repeating-linear-gradient(90deg,#1b1d1a 0 1px,transparent 1px 8.333%),linear-gradient(#171916,#0a0b0a)}.waveform-grid.pending{animation:pulse 1.2s ease-in-out infinite alternate}.region-lane,.transport-lane{position:absolute;z-index:2;left:0;right:0}.region-lane{top:0;height:50%;cursor:crosshair}.transport-lane{bottom:0;height:50%;cursor:ew-resize}.midline{position:absolute;z-index:1;top:50%;right:0;left:0;height:1px;background:#ffffff16;pointer-events:none}.selection{position:absolute;top:0;bottom:0;border:0;border-left:1px solid var(--signal);border-right:1px solid var(--signal);background:#c6ff5224;cursor:grab}.handle{position:absolute;top:0;bottom:0;width:28px;transform:translateX(-50%);border:0;background:transparent;cursor:ew-resize;z-index:3}.marker{position:absolute;top:10px;transform:translateX(-50%);z-index:4;color:var(--signal);font:8px ui-monospace,monospace}.playhead{position:absolute;top:0;bottom:0;width:1px;background:#fff;box-shadow:0 0 8px #fff;pointer-events:none;z-index:5}.playhead::after{content:'';position:absolute;top:calc(50% - 4px);left:50%;width:7px;height:7px;border-radius:50%;background:#fff;transform:translate(-50%,-50%)}.clock{position:absolute;z-index:4;bottom:8px;color:var(--muted);font:9px ui-monospace,monospace;pointer-events:none}.clock.start{left:9px}.clock.end{right:9px}.waveform-footer{display:flex;align-items:center;gap:12px;padding:0 12px;border-top:1px solid var(--line);color:var(--muted);font:9px ui-monospace,monospace}.waveform-footer button{margin-left:auto;border:0;background:transparent;color:var(--signal);font:inherit}.failure{color:#ff8e78}@keyframes pulse{to{opacity:.45}}
 </style>

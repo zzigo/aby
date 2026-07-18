@@ -495,7 +495,7 @@
   <meta name="description" content="A touch-first catalog and temporal media instrument." />
 </svelte:head>
 
-<main class:transport-active={Boolean($currentPlayback)} class:gallery-active={viewIndex === 3} class="instrument-shell">
+<main class:transport-active={Boolean($currentPlayback)} class:signal-active={viewIndex === 1 || viewIndex === 2} class:gallery-active={viewIndex === 3} class="instrument-shell">
   <section class="instrument-stage" ontouchstart={startViewGesture} ontouchend={endViewGesture} aria-label={`${views[viewIndex]} visualization`}>
     {#if message}<div class="instrument-status">{message}</div>{/if}
 
@@ -531,7 +531,7 @@
           </div>
         </div>
       {:else if viewIndex === 1}
-        <WaveformView asset={selected.asset} onplay={() => playItem(selected!)} />
+        <WaveformView asset={selected.asset} />
       {:else if viewIndex === 2}
         <SpectrogramView asset={selected.asset} onplay={() => playItem(selected!)} />
       {:else}
