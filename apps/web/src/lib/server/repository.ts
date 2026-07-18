@@ -28,6 +28,21 @@ export interface SpectrogramAnalysis {
   createdAt: string;
 }
 
+export interface SourceRetirementCandidate {
+  id: string;
+  provider: string;
+  bucket: string;
+  sourceObjectKey: string;
+  canonicalObjectKey: string;
+  checksumSha256: string;
+  state: 'candidate' | 'approved' | 'retired' | 'rejected';
+  provenance: Provenance & { retirementVerification?: Record<string, unknown>; retirementDeletion?: Record<string, unknown> };
+  canonicalAssetId?: string;
+  canonicalSizeBytes?: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface AbyRepository {
   savePreview(preview: IngestPreview): Promise<IngestPreview>;
   getPreview(ownerId: string, previewId: string): Promise<IngestPreview | null>;
@@ -62,6 +77,9 @@ export interface AbyRepository {
   saveSpectrogramAnalysis(ownerId: string, asset: Asset, input: Omit<SpectrogramAnalysis, 'id' | 'assetId' | 'sourceAssetChecksum' | 'createdAt'>): Promise<SpectrogramAnalysis>;
   getTimedText(ownerId: string, assetId: string, textType: TimedTextDocument['textType']): Promise<TimedTextDocument | null>;
   saveTimedText(ownerId: string, assetId: string, input: TimedTextSaveInput): Promise<TimedTextDocument>;
+  listSourceRetirementCandidates(ownerId: string): Promise<SourceRetirementCandidate[]>;
+  approveSourceRetirementCandidates(ownerId: string, verifications: Array<{ id: string; verification: Record<string, unknown> }>): Promise<void>;
+  markSourceRetired(ownerId: string, id: string, deletion: Record<string, unknown>): Promise<void>;
   createSegment(ownerId: string, input: SegmentCreate, provenance: Provenance): Promise<Segment>;
 }
 
@@ -387,6 +405,24 @@ export class MemoryAbyRepository implements AbyRepository {
     if (!asset || asset.ownerId !== ownerId) throw new AbyError('asset_not_found', 'Asset not found', 404);
     asset.canonicalMetadata = { ...asset.canonicalMetadata, ...metadata };
     return (await this.getCatalogItem(ownerId, assetId))!;
+  }
+
+  async listSourceRetirementCandidates(ownerId: string): Promise<SourceRetirementCandidate[]> {
+    void ownerId;
+    return [];
+  }
+
+  async approveSourceRetirementCandidates(ownerId: string, verifications: Array<{ id: string; verification: Record<string, unknown> }>): Promise<void> {
+    void ownerId;
+    void verifications;
+    throw new AbyError('retirement_requires_database', 'Source retirement requires the persistent catalog', 503);
+  }
+
+  async markSourceRetired(ownerId: string, id: string, deletion: Record<string, unknown>): Promise<void> {
+    void ownerId;
+    void id;
+    void deletion;
+    throw new AbyError('retirement_requires_database', 'Source retirement requires the persistent catalog', 503);
   }
 
   async relocateAsset(ownerId: string, assetId: string, sourceObjectKey: string, targetObjectKey: string, collectionCode: string): Promise<CatalogItem> {
@@ -1194,6 +1230,69 @@ export class PostgresAbyRepository implements AbyRepository {
   async objectKeyInUse(objectKey: string): Promise<boolean> {
     const result = await this.#pool.query("SELECT 1 FROM aby.assets WHERE object_key=$1 AND state='active' LIMIT 1", [objectKey]);
     return Boolean(result.rows[0]);
+  }
+
+  async listSourceRetirementCandidates(ownerId: string): Promise<SourceRetirementCandidate[]> {
+    const result = await this.#pool.query(
+      `SELECT src.*,a.id AS canonical_asset_id,
+              CASE WHEN (a.technical_metadata->>'sizeBytes') ~ '^[0-9]+$'
+                   THEN (a.technical_metadata->>'sizeBytes')::bigint END AS canonical_size_bytes
+       FROM aby.source_retirement_candidates src
+       LEFT JOIN aby.assets a ON a.owner_id=src.owner_id
+        AND a.object_key=src.canonical_object_key
+        AND a.checksum_sha256=src.checksum_sha256
+        AND a.state='active'
+       WHERE src.owner_id=$1 AND src.state<>'retired'
+       ORDER BY src.source_object_key`,
+      [ownerId]
+    );
+    return result.rows.map((row) => ({
+      id: row.id,
+      provider: row.provider,
+      bucket: row.bucket,
+      sourceObjectKey: row.source_object_key,
+      canonicalObjectKey: row.canonical_object_key,
+      checksumSha256: row.checksum_sha256,
+      state: row.state,
+      provenance: row.provenance,
+      ...(row.canonical_asset_id ? { canonicalAssetId: row.canonical_asset_id } : {}),
+      ...(row.canonical_size_bytes !== null ? { canonicalSizeBytes: Number(row.canonical_size_bytes) } : {}),
+      createdAt: new Date(row.created_at).toISOString(),
+      updatedAt: new Date(row.updated_at).toISOString()
+    }));
+  }
+
+  async approveSourceRetirementCandidates(ownerId: string, verifications: Array<{ id: string; verification: Record<string, unknown> }>): Promise<void> {
+    if (!verifications.length) return;
+    const client = await this.#pool.connect();
+    try {
+      await client.query('BEGIN');
+      for (const entry of verifications) {
+        const result = await client.query(
+          `UPDATE aby.source_retirement_candidates
+           SET state='approved',provenance=provenance || jsonb_build_object('retirementVerification',$1::jsonb),updated_at=now()
+           WHERE id=$2 AND owner_id=$3 AND state IN ('candidate','approved') RETURNING id`,
+          [entry.verification, entry.id, ownerId]
+        );
+        if (!result.rows[0]) throw new AbyError('retirement_candidate_changed', 'A retirement candidate changed during verification', 409);
+      }
+      await client.query('COMMIT');
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async markSourceRetired(ownerId: string, id: string, deletion: Record<string, unknown>): Promise<void> {
+    const result = await this.#pool.query(
+      `UPDATE aby.source_retirement_candidates
+       SET state='retired',provenance=provenance || jsonb_build_object('retirementDeletion',$1::jsonb),updated_at=now()
+       WHERE id=$2 AND owner_id=$3 AND state='approved' RETURNING id`,
+      [deletion, id, ownerId]
+    );
+    if (!result.rows[0]) throw new AbyError('retirement_candidate_not_approved', 'The source object is no longer approved for deletion', 409);
   }
 
   async createSegment(ownerId: string, input: SegmentCreate, provenance: Provenance): Promise<Segment> {

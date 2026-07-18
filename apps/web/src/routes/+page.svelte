@@ -6,6 +6,17 @@
   import { formatDuration, formatTechnicalFormat } from '$lib/presentation';
 
   type SharedPageData = { user: { id: string; name?: string | null; email?: string | null; picture?: string | null } | null };
+  type RetirementFolder = {
+    folder: string;
+    objectCount: number;
+    sizeBytes: number;
+    sizeComplete: boolean;
+    canonicalCount: number;
+    state: 'candidate' | 'blocked' | 'verified';
+    checkedAt?: string;
+    detail?: string;
+  };
+  type RetirementSort = 'folder' | 'objectCount' | 'sizeBytes' | 'state' | 'checkedAt';
   let { data }: { data: SharedPageData } = $props();
 
   let preview = $state<IngestPreview | null>(null);
@@ -28,6 +39,13 @@
   let conversionCodec = $state<'libvorbis' | 'libopus'>('libvorbis');
   let conversionQuality = $state(6);
   let setupMessage = $state('');
+  let retirementFolders = $state<RetirementFolder[]>([]);
+  let retirementLoading = $state(false);
+  let retirementBusy = $state('');
+  let retirementNotice = $state('');
+  let retirementMessages = $state<Record<string, string>>({});
+  let retirementSort = $state<RetirementSort>('folder');
+  let retirementDirection = $state<1 | -1>(1);
 
   onMount(async () => {
     const userId = data.user?.id ?? 'anonymous';
@@ -41,8 +59,96 @@
           conversionQuality = body.conversion.quality;
         }
       } catch { /* setup keeps its documented defaults */ }
+      await loadRetirementFolders();
     }
   });
+
+  async function loadRetirementFolders() {
+    retirementLoading = true;
+    try {
+      const response = await fetch('/api/retirement/folders');
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error?.message ?? 'Retirement queue could not be loaded');
+      retirementFolders = body.folders ?? [];
+    } catch (error) {
+      retirementNotice = error instanceof Error ? error.message : 'Retirement queue could not be loaded';
+    } finally {
+      retirementLoading = false;
+    }
+  }
+
+  function setRetirementSort(key: RetirementSort) {
+    if (retirementSort === key) retirementDirection = retirementDirection === 1 ? -1 : 1;
+    else { retirementSort = key; retirementDirection = 1; }
+  }
+
+  function sortedRetirementFolders() {
+    const states = { verified: 0, candidate: 1, blocked: 2 };
+    return [...retirementFolders].sort((left, right) => {
+      let result = 0;
+      if (retirementSort === 'state') result = states[left.state] - states[right.state];
+      else if (retirementSort === 'folder') result = left.folder.localeCompare(right.folder);
+      else if (retirementSort === 'checkedAt') result = (left.checkedAt ?? '').localeCompare(right.checkedAt ?? '');
+      else result = left[retirementSort] - right[retirementSort];
+      return result * retirementDirection;
+    });
+  }
+
+  function formatBytes(value: number, complete = true) {
+    if (!value && !complete) return '—';
+    const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+    let amount = value;
+    let unit = 0;
+    while (amount >= 1_000 && unit < units.length - 1) { amount /= 1_000; unit += 1; }
+    return `${complete ? '' : '≥ '}${amount.toLocaleString(undefined, { maximumFractionDigits: unit ? 1 : 0 })} ${units[unit]}`;
+  }
+
+  function verificationMessage(verification: any) {
+    if (verification.verified) return `${verification.matchedCount} objects match. Deletion unlocked for 24 hours.`;
+    const failures = [
+      verification.untrackedObjects?.length ? `${verification.untrackedObjects.length} untracked in source` : '',
+      verification.missingSourceObjects?.length ? `${verification.missingSourceObjects.length} missing in source` : '',
+      verification.missingCanonicalObjects?.length ? `${verification.missingCanonicalObjects.length} missing in catalog` : '',
+      verification.mismatchedObjects?.length ? `${verification.mismatchedObjects.length} hash/size mismatch` : ''
+    ].filter(Boolean);
+    return failures.join(' · ') || 'Folder did not pass the complete manifest check.';
+  }
+
+  async function checkRetirementFolder(folder: string) {
+    retirementBusy = folder;
+    retirementMessages = { ...retirementMessages, [folder]: 'rclone is comparing the mapped objects…' };
+    try {
+      const response = await fetch('/api/retirement/folders', {
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ folder })
+      });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error?.message ?? 'Folder check failed');
+      retirementMessages = { ...retirementMessages, [folder]: verificationMessage(body.verification) };
+      await loadRetirementFolders();
+    } catch (error) {
+      retirementMessages = { ...retirementMessages, [folder]: error instanceof Error ? error.message : 'Folder check failed' };
+    } finally {
+      retirementBusy = '';
+    }
+  }
+
+  async function deleteRetirementFolder(folder: string) {
+    retirementBusy = folder;
+    retirementMessages = { ...retirementMessages, [folder]: 'Running a fresh rclone preflight before deletion…' };
+    try {
+      const response = await fetch('/api/retirement/folders', {
+        method: 'DELETE', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ folder })
+      });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error?.message ?? 'Source folder could not be deleted');
+      retirementNotice = `${body.deletion.folder}: ${body.deletion.deletedObjects} source objects deleted; canonical Aby copies remain.`;
+      await loadRetirementFolders();
+    } catch (error) {
+      retirementMessages = { ...retirementMessages, [folder]: error instanceof Error ? error.message : 'Source folder could not be deleted' };
+    } finally {
+      retirementBusy = '';
+    }
+  }
 
   function toggleAutoSeparation() {
     autoSeparation = !autoSeparation;
@@ -445,6 +551,45 @@
   </section>
 
   {#if data.user}
+    <section class="retirement-section" aria-label="Source retirement queue">
+      <header>
+        <div><span>RETIREMENT</span><h2>Copied source folders</h2></div>
+        <button class="retirement-refresh" onclick={loadRetirementFolders} disabled={retirementLoading || Boolean(retirementBusy)} aria-label="Refresh retirement queue">↻</button>
+      </header>
+      <p class="retirement-intro">Only complete folders can be removed. Check compares every current source object with its renamed canonical Aby target through rclone; unexpected files block deletion.</p>
+      {#if retirementNotice}<div class="retirement-notice">{retirementNotice}</div>{/if}
+      <div class="retirement-table-wrap">
+        <table>
+          <thead><tr>
+            <th><button onclick={() => setRetirementSort('folder')}>SOURCE FOLDER {retirementSort === 'folder' ? (retirementDirection === 1 ? '↑' : '↓') : ''}</button></th>
+            <th><button onclick={() => setRetirementSort('objectCount')}>FILES {retirementSort === 'objectCount' ? (retirementDirection === 1 ? '↑' : '↓') : ''}</button></th>
+            <th><button onclick={() => setRetirementSort('sizeBytes')}>SIZE {retirementSort === 'sizeBytes' ? (retirementDirection === 1 ? '↑' : '↓') : ''}</button></th>
+            <th><button onclick={() => setRetirementSort('state')}>STATE {retirementSort === 'state' ? (retirementDirection === 1 ? '↑' : '↓') : ''}</button></th>
+            <th><button onclick={() => setRetirementSort('checkedAt')}>CHECKED {retirementSort === 'checkedAt' ? (retirementDirection === 1 ? '↑' : '↓') : ''}</button></th>
+            <th><span class="visually-hidden">Actions</span></th>
+          </tr></thead>
+          <tbody>
+            {#if retirementLoading && retirementFolders.length === 0}
+              <tr><td colspan="6" class="empty-retirement">Loading candidates…</td></tr>
+            {:else if retirementFolders.length === 0}
+              <tr><td colspan="6" class="empty-retirement">No copied source folders are waiting for retirement.</td></tr>
+            {:else}
+              {#each sortedRetirementFolders() as folder (folder.folder)}
+                <tr>
+                  <td class="retirement-folder"><strong>{folder.folder}</strong>{#if folder.detail}<small>{folder.detail}</small>{/if}{#if retirementMessages[folder.folder]}<small class="retirement-result">{retirementMessages[folder.folder]}</small>{/if}</td>
+                  <td>{folder.objectCount}<small>{folder.canonicalCount} catalogued</small></td>
+                  <td>{formatBytes(folder.sizeBytes, folder.sizeComplete)}</td>
+                  <td><span class:verified={folder.state === 'verified'} class:blocked={folder.state === 'blocked'} class="retirement-state">{folder.state}</span></td>
+                  <td>{folder.checkedAt ? new Date(folder.checkedAt).toLocaleString() : '—'}</td>
+                  <td><div class="retirement-actions"><button onclick={() => checkRetirementFolder(folder.folder)} disabled={retirementBusy === folder.folder}>CHECK</button><button class="delete-source" onclick={() => deleteRetirementFolder(folder.folder)} disabled={folder.state !== 'verified' || retirementBusy === folder.folder}>DELETE</button></div></td>
+                </tr>
+              {/each}
+            {/if}
+          </tbody>
+        </table>
+      </div>
+    </section>
+
     <section class="setup-section" aria-label="Setup">
       <header><span>SETUP</span><h2>Processing defaults</h2></header>
       <div class="setup-grid">
@@ -486,5 +631,13 @@
   .setup-section>header span{font:10px ui-monospace,monospace;color:var(--signal)}.setup-section h2{margin:0;font-size:18px;font-weight:500}
   .setup-grid{display:grid;grid-template-columns:1.2fr auto 1fr 1fr auto;gap:18px;align-items:end;padding:22px}.setup-grid>div{display:grid}.setup-grid small{color:var(--muted)}
   .setup-grid label{display:grid;gap:7px;font:10px ui-monospace,monospace;color:var(--muted)}.setup-grid select{background:#111310;color:#fff;border:1px solid var(--line);padding:9px}.setup-grid button{border:1px solid var(--line);background:transparent;color:#fff;padding:9px 14px}.setup-grid button.active,.save-setup{background:var(--signal)!important;color:#101110!important}.setup-message{align-self:center}
-  @media(max-width:760px){.setup-grid{grid-template-columns:1fr auto}.setup-grid label{grid-column:span 2}.save-setup{grid-column:span 2}}
+  .retirement-section{margin-top:72px;background:var(--surface);border:1px solid var(--line)}
+  .retirement-section>header{display:flex;align-items:center;justify-content:space-between;padding:18px 22px;border-bottom:1px solid var(--line)}
+  .retirement-section>header>div{display:flex;gap:18px;align-items:baseline}.retirement-section>header span{font:10px ui-monospace,monospace;color:var(--signal)}.retirement-section h2{margin:0;font-size:18px;font-weight:500}
+  .retirement-intro{max-width:850px;margin:0;padding:16px 22px;color:var(--muted);font-size:12px;line-height:1.5}.retirement-notice{padding:12px 22px;color:var(--signal);font:11px ui-monospace,monospace;border-top:1px solid var(--line)}
+  .retirement-refresh{border:0;background:transparent;color:var(--signal);font-size:18px;cursor:pointer}.retirement-table-wrap{overflow-x:auto;border-top:1px solid var(--line)}
+  .retirement-section table{width:100%;border-collapse:collapse;min-width:900px}.retirement-section th,.retirement-section td{padding:12px 14px;text-align:left;border-bottom:1px solid var(--line);vertical-align:top;font:10px ui-monospace,monospace}.retirement-section th{padding-block:8px;color:var(--muted);font-weight:400}.retirement-section th button{border:0;background:transparent;color:inherit;font:inherit;padding:0;cursor:pointer}.retirement-section tbody tr:last-child td{border-bottom:0}
+  .retirement-folder{max-width:480px}.retirement-folder strong{display:block;color:#fff;font-weight:500;overflow-wrap:anywhere}.retirement-section td small{display:block;margin-top:4px;color:var(--muted)}.retirement-result{color:var(--signal)!important}.retirement-state{text-transform:uppercase;color:var(--muted)}.retirement-state.verified{color:var(--signal)}.retirement-state.blocked{color:#ff8b70}
+  .retirement-actions{display:flex;gap:6px;justify-content:flex-end}.retirement-actions button{border:1px solid var(--line);background:transparent;color:#fff;padding:7px 10px;font:9px ui-monospace,monospace;cursor:pointer}.retirement-actions button:disabled{opacity:.28;cursor:not-allowed}.retirement-actions .delete-source:not(:disabled){border-color:#ff765f;color:#ff8b70}.empty-retirement{padding:30px!important;text-align:center!important;color:var(--muted)}.visually-hidden{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+  @media(max-width:760px){.setup-grid{grid-template-columns:1fr auto}.setup-grid label{grid-column:span 2}.save-setup{grid-column:span 2}.retirement-section{margin-top:42px}.retirement-section>header{padding:15px}.retirement-intro{padding:14px 15px}}
 </style>

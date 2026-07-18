@@ -33,6 +33,10 @@ There is exactly one active binary authority per asset.
 6. PostgreSQL switches the asset's active object key only after verification.
 7. Retirement of the legacy object is a separate, explicit approval and deletion step.
 
+The Inspect dashboard exposes that last step as a folder queue. It groups retirement candidates by their original human-readable directory and shows candidate file count, known canonical size and catalog resolution state. `CHECK` uses rclone to enumerate the live source folder and compare each source object with the renamed canonical target from Aby's promotion manifest. A direct folder-to-folder comparison is intentionally not used because canonical names and hierarchy may differ.
+
+Deletion unlocks only when every live object in the source folder has a catalogued canonical mapping and every mapped pair has equal size and hash. An untracked cover, sidecar or any other unexpected object blocks the entire folder. Approval expires after 24 hours, and `DELETE` always repeats the complete rclone preflight before issuing exact per-object deletions. It never performs a recursive delete against a user-supplied path. Each deleted source object is marked `retired`; the canonical `aby/` object and original provenance remain.
+
 The original filename, object key, directory, provider, checksum, import batch and timestamps remain permanently recorded as provenance. The system must never leave two objects marked active.
 
 ## Access and derived material
