@@ -1,7 +1,13 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, tick } from 'svelte';
   import { page } from '$app/state';
-  import { currentPlayback, currentPlaybackTimeMs } from '$lib/player';
+  import {
+    advancePlayback,
+    currentPlayback,
+    currentPlaybackTimeMs,
+    playbackMode,
+    type PlaybackMode
+  } from '$lib/player';
   import { formatDuration } from '$lib/presentation';
 
   let audio = $state<HTMLAudioElement | null>(null);
@@ -60,6 +66,26 @@
     }
   }
 
+  function selectPlaybackMode(mode: PlaybackMode) {
+    playbackMode.set(mode);
+    localStorage.setItem('aby.playback-mode', mode);
+  }
+
+  async function handleEnded() {
+    if (!audio) return;
+    if ($playbackMode === 'loop-track') {
+      seekToSegmentStart();
+      await audio.play().catch(() => {});
+      return;
+    }
+    isPlaying = false;
+    const advanced = await advancePlayback().catch(() => false);
+    if (advanced) {
+      await tick();
+      await audio.play().catch(() => {});
+    }
+  }
+
   function handleProgressPointerDown(event: PointerEvent) {
     if (!audio || !progressBarElement) return;
     event.preventDefault();
@@ -112,6 +138,10 @@
   }
 
   onMount(() => {
+    const storedMode = localStorage.getItem('aby.playback-mode');
+    if (storedMode === 'continuous' || storedMode === 'loop-track' || storedMode === 'random') {
+      playbackMode.set(storedMode);
+    }
     const unsubscribe = currentPlayback.subscribe((item) => {
       if (!item || !('mediaSession' in navigator)) return;
       navigator.mediaSession.metadata = new MediaMetadata({
@@ -139,7 +169,7 @@
       onloadedmetadata={seekToSegmentStart} 
       ontimeupdate={handleTimeUpdate}
       ondurationchange={handleDurationChange}
-      onended={() => isPlaying = false}
+      onended={handleEnded}
       onpause={() => isPlaying = false}
       onplay={() => isPlaying = true}
       style="display: none;"
@@ -179,6 +209,11 @@
       </div>
 
       <div style="display: flex; align-items: center; gap: 24px; pointer-events: auto;">
+        <div class="playback-modes" role="toolbar" aria-label="Playback mode">
+          <button class:active={$playbackMode === 'continuous'} onclick={() => selectPlaybackMode('continuous')} title="Continuous album" aria-label="Continuous album">≡→</button>
+          <button class:active={$playbackMode === 'loop-track'} onclick={() => selectPlaybackMode('loop-track')} title="Loop track" aria-label="Loop track">↻1</button>
+          <button class:active={$playbackMode === 'random'} onclick={() => selectPlaybackMode('random')} title="Random catalog" aria-label="Random catalog">⤨</button>
+        </div>
         <button 
           onclick={togglePlay}
           style="background: rgba(16, 17, 16, 0.7); border: 1px solid var(--line); border-radius: 3px; padding: 6px 14px; color: #fff; cursor: pointer; font: 10px ui-monospace, monospace; letter-spacing: 0.08em; font-weight: bold; z-index: 10; transition: border-color 0.2s;"
@@ -206,7 +241,34 @@
     padding-left: 12px;
   }
 
+  .playback-modes {
+    display: flex;
+    gap: 2px;
+  }
+
+  .playback-modes button {
+    width: 30px;
+    height: 28px;
+    padding: 0;
+    border: 1px solid transparent;
+    background: rgba(16, 17, 16, 0.7);
+    color: var(--muted);
+    cursor: pointer;
+    font: 10px ui-monospace, monospace;
+  }
+
+  .playback-modes button.active {
+    border-color: var(--signal);
+    color: var(--signal);
+  }
+
   @media (max-width: 600px) {
+    .playback-modes button {
+      width: 25px;
+      height: 25px;
+      font-size: 9px;
+    }
+
     .player-time-display {
       font-size: 0.6rem;
       letter-spacing: -0.02em;

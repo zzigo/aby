@@ -4,7 +4,14 @@
   import type { CatalogItem, CatalogSegment } from '@zztt/aby-domain';
   import type { PageData } from './$types';
   import { formatDuration } from '$lib/presentation';
-  import { currentPlayback, currentPlaybackTimeMs, loadPlayback, loadSegmentPlayback } from '$lib/player';
+  import {
+    currentPlayback,
+    currentPlaybackTimeMs,
+    loadPlayback,
+    loadSegmentPlayback,
+    setPlaybackCatalog,
+    type PlaybackContextItem
+  } from '$lib/player';
   import SpectrogramView from '$lib/components/SpectrogramView.svelte';
   import TrackEditor from '$lib/components/TrackEditor.svelte';
   import AlbumEditor from '$lib/components/AlbumEditor.svelte';
@@ -167,13 +174,28 @@
     persistFolders();
   }
 
+  function playbackContext(item: CatalogItem): PlaybackContextItem {
+    return {
+      assetId: item.asset.id,
+      title: item.recordingTitle,
+      subtitle: item.creator ?? item.albumTitle ?? item.workTitle,
+      ...(item.albumId ? { albumId: item.albumId } : {}),
+      ...(item.trackNumber !== undefined ? { trackNumber: item.trackNumber } : {})
+    };
+  }
+
+  function syncPlaybackCatalog(source: CatalogItem[] = items) {
+    setPlaybackCatalog(source.map(playbackContext));
+  }
+
   onMount(async () => {
     try {
       const response = await fetch('/api/catalog');
       const body = await response.json();
       if (!response.ok) throw new Error(body.error?.message ?? 'Catalog could not be loaded');
       items = body.items;
-      selected = items[0] ?? null;
+      syncPlaybackCatalog(items);
+      selected = items.find((item) => item.asset.id === $currentPlayback?.assetId) ?? items[0] ?? null;
       try {
         const storedFavorites: unknown = JSON.parse(localStorage.getItem(`aby.favorite-folders:${storageSuffix}`) ?? '[]');
         const storedRecents: unknown = JSON.parse(localStorage.getItem(`aby.recent-folders:${storageSuffix}`) ?? '[]');
@@ -223,6 +245,11 @@
     return () => window.removeEventListener('keydown', handleShortcut);
   });
 
+  onMount(() => currentPlayback.subscribe((playback) => {
+    if (!playback) return;
+    selected = items.find((item) => item.asset.id === playback.assetId) ?? selected;
+  }));
+
   function selectView(direction: number) {
     viewIndex = (viewIndex + direction + views.length) % views.length;
   }
@@ -254,7 +281,11 @@
     drawerOpen = false;
     message = '';
     try {
-      await loadPlayback(item.asset.id, item.workTitle, item.creator ?? item.recordingTitle);
+      const context = playbackContext(item);
+      await loadPlayback(context.assetId, context.title, context.subtitle, {
+        ...(context.albumId ? { albumId: context.albumId } : {}),
+        ...(context.trackNumber !== undefined ? { trackNumber: context.trackNumber } : {})
+      });
       message = '';
     } catch (error) {
       message = error instanceof Error ? error.message : 'Playback failed';
@@ -322,6 +353,7 @@
   async function removeItem(item: CatalogItem) {
     const before = items;
     items = items.filter((candidate) => candidate.asset.id !== item.asset.id);
+    syncPlaybackCatalog(items);
     if (selected?.asset.id === item.asset.id) selected = items[0] ?? null;
     try {
       const response = await fetch(`/api/assets/${item.asset.id}`, { method: 'DELETE' });
@@ -330,12 +362,14 @@
       message = '';
     } catch (error) {
       items = before;
+      syncPlaybackCatalog(items);
       message = error instanceof Error ? error.message : 'Delete failed';
     }
   }
 
   function replaceItem(updated: CatalogItem) {
     items = items.map((item) => item.asset.id === updated.asset.id ? updated : item);
+    syncPlaybackCatalog(items);
     if (selected?.asset.id === updated.asset.id) selected = updated;
     if (editingItem?.asset.id === updated.asset.id) editingItem = updated;
   }
@@ -343,6 +377,7 @@
   function replaceAlbumItems(updated: CatalogItem[]) {
     const replacements = new Map(updated.map((item) => [item.asset.id, item]));
     items = items.map((item) => replacements.get(item.asset.id) ?? item);
+    syncPlaybackCatalog(items);
     if (selected) selected = replacements.get(selected.asset.id) ?? selected;
     if (editingItem) editingItem = replacements.get(editingItem.asset.id) ?? editingItem;
     editingAlbumItems = updated;
@@ -422,6 +457,7 @@
       const catalogBody = await catalogResponse.json();
       if (catalogResponse.ok) {
         items = catalogBody.items;
+        syncPlaybackCatalog(items);
       }
       message = `Saved draft: ${formatDuration(startMs)} – ${formatDuration(endMs)}`;
       setTimeout(() => { if (message.startsWith('Saved draft')) message = ''; }, 4000);
