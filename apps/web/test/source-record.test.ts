@@ -13,7 +13,7 @@ test('reads creator and work from the classical hierarchy', () => {
 test('extracts the creator from a collective album directly below Impro', () => {
   expect(sourceRecord('ref/Impro/axel dorner - sind (2007)/22 track 22.mp3', config)).toMatchObject({
     mediaKind: 'aud', collectionCode: '20L', creatorDisplay: 'axel dorner', entitySlug: 'axeldorner',
-    workTitle: 'axel dorner - sind (2007)', recordingTitle: 'track 22'
+    workTitle: 'axel dorner - sind (2007)', recordingTitle: '22'
   });
 });
 
