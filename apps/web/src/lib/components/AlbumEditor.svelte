@@ -156,8 +156,18 @@
         body: JSON.stringify(albumPayload())
       });
       acceptItems(saved.items);
-      const body = await jsonRequest(`/api/albums/${first.albumId}/id3`, { method: 'POST' });
-      message = `${body.written} ID3 ${body.written === 1 ? 'copy' : 'copies'} ready · audio streams unchanged`;
+      let offset = 0;
+      let total = albumItems.filter((item) => item.asset.objectKey.toLowerCase().endsWith('.mp3')).length;
+      do {
+        const body = await jsonRequest(`/api/albums/${first.albumId}/id3`, {
+          method: 'POST', headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ offset, limit: 5 })
+        });
+        total = body.total;
+        offset = body.nextOffset ?? body.processed;
+        message = `ID3 ${body.processed}/${body.total} · audio streams unchanged`;
+      } while (offset < total);
+      message = `${total} ID3 ${total === 1 ? 'copy' : 'copies'} ready · audio streams unchanged`;
     } catch (error) {
       message = error instanceof Error ? error.message : 'ID3 write failed';
     } finally {

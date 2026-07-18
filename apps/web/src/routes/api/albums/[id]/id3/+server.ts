@@ -6,7 +6,8 @@ import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { inspectLocalAsset } from '@zztt/aby-media-ingest';
 import type { CatalogItem } from '@zztt/aby-domain';
-import { api, AbyError, ownerFor } from '$lib/server/errors';
+import { z } from 'zod';
+import { api, AbyError, jsonBody, ownerFor } from '$lib/server/errors';
 import { readConfig } from '$lib/server/config';
 import { id3FfmpegArgs, id3Values } from '$lib/server/id3';
 import { getRepository } from '$lib/server/repository';
@@ -45,12 +46,17 @@ export const POST: RequestHandler = (event) => api('album.id3.write', async () =
   if (!items.length) throw new AbyError('album_not_found', 'Album not found', 404);
   const mp3Items = items.filter((item) => item.asset.objectKey.toLowerCase().endsWith('.mp3'));
   if (!mp3Items.length) throw new AbyError('id3_unavailable', 'This album has no MP3 assets', 409);
+  const input = z.object({
+    offset: z.number().int().nonnegative().default(0),
+    limit: z.number().int().min(1).max(10).default(5)
+  }).parse(await jsonBody(event));
+  const batch = mp3Items.slice(input.offset, input.offset + input.limit);
   const config = readConfig();
   const directory = await mkdtemp(join(tmpdir(), 'aby-id3-'));
   const results: Array<{ assetId: string; objectKey: string; checksumSha256: string; reused: boolean }> = [];
   try {
-    const cover = await coverFile(mp3Items[0], directory);
-    for (const item of mp3Items) {
+    const cover = await coverFile(batch[0], directory);
+    for (const item of batch) {
       const values = id3Values(item);
       const metadataDigest = createHash('sha256').update(JSON.stringify({ values, cover: item.asset.canonicalMetadata.imageCandidates?.[0]?.sourceId })).digest('hex').slice(0, 16);
       const objectKey = `aby/_derivatives/id3/${item.asset.id}/${item.asset.checksumSha256.slice(0, 16)}-${metadataDigest}.mp3`;
@@ -86,5 +92,13 @@ export const POST: RequestHandler = (event) => api('album.id3.write', async () =
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
-  return { written: results.length, results };
+  const nextOffset = Math.min(input.offset + batch.length, mp3Items.length);
+  return {
+    written: results.length,
+    total: mp3Items.length,
+    processed: nextOffset,
+    complete: nextOffset >= mp3Items.length,
+    ...(nextOffset < mp3Items.length ? { nextOffset } : {}),
+    results
+  };
 });
