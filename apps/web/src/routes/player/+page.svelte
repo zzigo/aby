@@ -174,7 +174,14 @@
     if (!$playbackIsPlaying || index < 0 || !container) return;
     requestAnimationFrame(() => {
       const active = container.querySelector<HTMLElement>(`[data-lyric-index="${index}"]`);
-      if (active) container.scrollTo({ top: Math.max(0, active.offsetTop - container.clientHeight * .75), behavior: 'smooth' });
+      if (!active) return;
+      const viewport = window.visualViewport;
+      const viewportAnchor = (viewport?.offsetTop ?? 0) + (viewport?.height ?? window.innerHeight) * .75;
+      const containerRect = container.getBoundingClientRect();
+      const activeRect = active.getBoundingClientRect();
+      const localAnchor = Math.max(0, Math.min(container.clientHeight, viewportAnchor - containerRect.top));
+      const activeContentCenter = activeRect.top - containerRect.top + container.scrollTop + activeRect.height / 2;
+      container.scrollTo({ top: Math.max(0, activeContentCenter - localAnchor), behavior: 'smooth' });
     });
   });
 
