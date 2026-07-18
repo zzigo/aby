@@ -79,8 +79,8 @@ audio { display: none; }
 .instrument-stage { position: relative; min-height: calc(100svh - 64px); display: grid; place-items: center; padding: 0 52px 60px; touch-action: pan-y; overflow: hidden; }
 .signal-active .instrument-stage { padding-right: 0; padding-left: 0; }
 .instrument-status { position: absolute; z-index: 4; top: 14px; left: 18px; max-width: calc(100% - 36px); color: #ff8e78; font: 11px ui-monospace,monospace; }
-.cover-view { width: min(1180px, 92vw); display: grid; grid-template-columns: minmax(280px, 68vh) minmax(260px, 1fr); gap: clamp(28px, 7vw, 110px); align-items: center; }
-.cover-flip { position: relative; aspect-ratio: 1; width: 100%; perspective: 1200px; touch-action: manipulation; }
+.cover-view { width: min(1180px, 92vw); display: grid; grid-template-columns: minmax(280px, 68vh) minmax(260px, 1fr); grid-template-areas: "art copy" "lyrics copy"; column-gap: clamp(28px, 7vw, 110px); row-gap: 18px; align-items: start; }
+.cover-flip { grid-area: art; position: relative; aspect-ratio: 1; width: 100%; align-self: center; perspective: 1200px; touch-action: manipulation; }
 .cover-flip__inner { position: relative; width: 100%; height: 100%; transform-style: preserve-3d; -webkit-transform-style: preserve-3d; transition: transform 620ms cubic-bezier(.2,.75,.25,1),filter 620ms ease; will-change: transform; }
 .cover-flip[data-flipped="true"] .cover-flip__inner { transform: rotateY(180deg); }
 .cover-flip__face { position: absolute; inset: 0; overflow: hidden; border: 0; backface-visibility: hidden; -webkit-backface-visibility: hidden; }
@@ -95,15 +95,15 @@ audio { display: none; }
 .cover-fallback small { color: var(--signal); text-transform: uppercase; letter-spacing: .12em; }
 .cover-fallback strong { font: 400 clamp(30px, 5vw, 72px)/.95 Georgia, serif; letter-spacing: -.04em; }
 .cover-play { position: absolute; right: 14px; bottom: 14px; min-width: 68px; min-height: 48px; display: grid; place-items: center; padding: 0 16px; border: 0; background: #101110dc; text-transform: uppercase; letter-spacing: .12em; font-size: 10px; }
-.instrument-copy { min-width: 0; }
+.instrument-copy { grid-area: copy; min-width: 0; align-self: center; }
 .instrument-copy h1 { max-width: 720px; font-size: clamp(45px, 7vw, 104px); overflow-wrap: anywhere; }
 .instrument-copy p { margin: 24px 0 0; color: var(--muted); font-size: clamp(17px, 2vw, 26px); }
 .side-navigation{position:absolute;z-index:14;width:48px;height:54px;padding:0;display:grid;place-items:center;border:0;background:transparent;color:#b3b6af;opacity:.3;transform:translateY(-50%)}
 .side-navigation.previous{left:0}.side-navigation.next{right:0}.side-navigation.album{top:28%}.side-navigation.visualization{top:50%}.side-navigation.track{top:72%}
 .side-navigation svg{width:29px;height:29px;fill:none;stroke:currentColor;stroke-width:1.35;stroke-linecap:round;stroke-linejoin:round}.side-navigation.visualization svg{width:31px;height:31px}
 .side-navigation:hover:not(:disabled),.side-navigation:focus-visible{opacity:.72;color:#e1e3dd;transform:translateY(-50%)}.side-navigation:disabled{opacity:.07;cursor:default}.cover-view,.spectrogram-view,.waveform-view{position:relative;z-index:2}
-.lyrics-toggle{position:absolute;z-index:15;left:0;bottom:70px;width:48px;height:52px;padding:0;display:grid;place-items:center;border:0;background:transparent;color:#b3b6af;opacity:.3}.lyrics-toggle svg{width:28px;height:28px;fill:none;stroke:currentColor;stroke-width:1.3;stroke-linecap:round;stroke-linejoin:round}.lyrics-toggle:hover:not(:disabled),.lyrics-toggle:focus-visible,.lyrics-toggle.active{transform:none;opacity:.75;color:#e1e3dd}.lyrics-toggle.active{color:var(--signal)}
-.lyrics-overlay{position:absolute;z-index:10;left:0;right:0;bottom:60px;max-height:48svh;box-sizing:border-box;padding:clamp(24px,5vw,72px) clamp(52px,9vw,150px) clamp(20px,4vw,54px);overflow-y:auto;overscroll-behavior:contain;background:linear-gradient(180deg,transparent 0,#0c0d0ce8 22%,#0c0d0c 100%);pointer-events:auto}.plain-lyrics{max-width:1100px;margin:0 auto;white-space:pre-wrap;color:#f0f1ed;font:italic clamp(28px,4.4vw,68px)/1.28 Georgia,'Times New Roman',serif;letter-spacing:-.025em}.timed-lyrics{max-width:1160px;margin:0 auto}.timed-lyrics p{margin:.2em 0;color:#777c73;font:italic clamp(26px,4.2vw,64px)/1.15 Georgia,'Times New Roman',serif;letter-spacing:-.035em;transition:color .2s,opacity .2s;opacity:.45}.timed-lyrics p.current{color:#f4f5f1;opacity:1}
+.lyrics-toggle{position:absolute;z-index:15;left:0;top:calc(72% + 36px);width:74px;height:48px;padding:0 4px;display:grid;grid-template-columns:32px 1fr;align-items:center;border:0;background:transparent;color:#b3b6af;opacity:.42}.lyrics-toggle svg{width:26px;height:26px;fill:none;stroke:currentColor;stroke-width:1.3;stroke-linecap:round;stroke-linejoin:round}.lyrics-toggle span{font:8px ui-monospace,monospace;letter-spacing:.08em}.lyrics-toggle:hover:not(:disabled),.lyrics-toggle:focus-visible,.lyrics-toggle.active{transform:none;opacity:.8;color:#e1e3dd}.lyrics-toggle.active{color:var(--signal)}
+.lyrics-active .instrument-stage{overflow-y:auto;place-items:start center;padding-top:18px}.lyrics-active .cover-view{grid-template-columns:minmax(280px,52vh) minmax(260px,1fr)}.cover-lyrics{grid-area:lyrics;width:100%;max-height:clamp(190px,30svh,370px);box-sizing:border-box;padding:4px 2px 18px 0;overflow-y:auto;overscroll-behavior:contain;scroll-behavior:smooth;scrollbar-width:thin}.cover-lyrics .plain-lyrics{margin:0;white-space:pre-wrap;color:#f0f1ed;font:italic clamp(21px,2.6vw,40px)/1.35 Georgia,'Times New Roman',serif;letter-spacing:-.02em}.cover-lyrics .timed-lyrics{margin:0}.cover-lyrics .timed-lyrics p{margin:.22em 0;color:#777c73;font:italic clamp(21px,2.6vw,40px)/1.18 Georgia,'Times New Roman',serif;letter-spacing:-.025em;transition:color .2s,opacity .2s;opacity:.45}.cover-lyrics .timed-lyrics p.current{color:#f4f5f1;opacity:1}
 .view-switcher { position: absolute; z-index: 19; left: 50%; bottom: 70px; transform: translateX(-50%); display: flex; gap: 4px; padding: 0; border: 0; background: #101110cc; }
 .view-switcher button { min-height: 40px; padding: 8px 13px; background: transparent; color: var(--muted); border: 0; text-transform: uppercase; letter-spacing: .1em; font-size: 9px; }
 .view-switcher button.active { background: transparent; color: var(--signal); }
@@ -175,8 +175,10 @@ audio { display: none; }
   .persistent-player.instrument-mode { left: 0; right: 0; bottom: 0; min-height: 72px; padding: 8px 12px; }
   .instrument-stage { min-height: calc(100svh - 64px); padding: 0 18px 72px; }
   .signal-active .instrument-stage { padding-right: 0; padding-left: 0; }
-  .cover-view { width: min(88vw, 620px); grid-template-columns: 1fr; gap: 24px; }
+  .cover-view { width: min(88vw, 620px); grid-template-columns: 1fr; grid-template-areas: "art" "lyrics" "copy"; gap: 18px; }
   .cover-flip { width: min(74vw, 48vh); justify-self: center; }
+  .lyrics-active .cover-view { grid-template-columns: 1fr; }
+  .lyrics-active .cover-flip { width: min(82vw, 42vh); }
   .cover-edit-control { display:grid;place-items:center; }
   .instrument-copy { text-align: center; }
   .instrument-copy h1 { margin-top: 10px; font-size: clamp(38px, 12vw, 66px); }
@@ -187,10 +189,10 @@ audio { display: none; }
   .side-navigation.album { top: 26%; }
   .side-navigation.visualization { top: 48%; }
   .side-navigation.track { top: 70%; }
-  .lyrics-toggle { width: 44px; height: 48px; bottom: 72px; }
-  .lyrics-overlay { max-height: 52svh; padding: 42px 34px 26px 48px; }
-  .plain-lyrics { font-size: clamp(25px,8.4vw,42px); }
-  .timed-lyrics p { font-size: clamp(25px,8vw,40px); }
+  .lyrics-toggle { top: calc(70% + 34px); width: 70px; height: 44px; }
+  .cover-lyrics { max-height: 34svh; padding: 2px 0 14px; }
+  .cover-lyrics .plain-lyrics { font-size: clamp(22px,7vw,38px); }
+  .cover-lyrics .timed-lyrics p { font-size: clamp(22px,7vw,38px); }
   .view-switcher { bottom: 62px; }
   .spectrogram-view { width: 100vw; height: calc(100svh - 184px); grid-template-rows: minmax(0,1fr) 110px; }
   .descriptor-strip { grid-template-columns: repeat(5,minmax(62px,1fr)); overflow-x: auto; }

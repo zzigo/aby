@@ -40,6 +40,7 @@
   let lyricsOpen = $state(false);
   let lyricsDocument = $state<TimedTextDocument | null>(null);
   let lyricsLoading = $state(false);
+  let lyricsScrollElement = $state<HTMLElement | null>(null);
   let itemGesture = { id: '', x: 0, y: 0 };
   let suppressClickId = '';
   let gestureStart = { x: 0, y: 0 };
@@ -166,10 +167,14 @@
     }
     return active;
   });
-  const visibleLyricCues = $derived.by(() => {
-    if (!lyricsDocument || lyricsDocument.syncLevel === 'none') return [];
-    const start = Math.max(0, activeLyricIndex < 0 ? 0 : activeLyricIndex);
-    return lyricsDocument.cues.slice(start, start + 3);
+  $effect(() => {
+    const index = activeLyricIndex;
+    const container = lyricsScrollElement;
+    if (index < 0 || !container) return;
+    requestAnimationFrame(() => {
+      const active = container.querySelector<HTMLElement>(`[data-lyric-index="${index}"]`);
+      if (active) container.scrollTo({ top: Math.max(0, active.offsetTop - container.clientHeight * .42), behavior: 'smooth' });
+    });
   });
 
   function nestedGroups(source: CatalogItem[], parentTitle: (item: CatalogItem) => string, childTitle: (item: CatalogItem) => string) {
@@ -260,6 +265,7 @@
       }
       drawerOpen = items.length === 0;
       message = '';
+      if (selected?.hasLyrics) await loadLyricsDocument(true);
     } catch (error) {
       message = error instanceof Error ? error.message : 'Catalog could not be loaded';
       drawerOpen = true;
@@ -305,6 +311,7 @@
       coverFlipped = false;
       lyricsOpen = false;
       lyricsDocument = null;
+      if (next.hasLyrics) void loadLyricsDocument(true);
     }
   }));
 
@@ -357,6 +364,7 @@
         ...(context.albumId ? { albumId: context.albumId } : {}),
         ...(context.trackNumber !== undefined ? { trackNumber: context.trackNumber } : {})
       });
+      if (item.hasLyrics) await loadLyricsDocument(true);
       message = '';
     } catch (error) {
       message = error instanceof Error ? error.message : 'Playback failed';
@@ -577,7 +585,7 @@
   <meta name="description" content="A touch-first catalog and temporal media instrument." />
 </svelte:head>
 
-<main class:transport-active={Boolean($currentPlayback)} class:signal-active={viewIndex === 1 || viewIndex === 2} class="instrument-shell">
+<main class:transport-active={Boolean($currentPlayback)} class:signal-active={viewIndex === 1 || viewIndex === 2} class:lyrics-active={viewIndex === 0 && lyricsOpen && Boolean(lyricsDocument)} class="instrument-shell">
   <section class="instrument-stage" ontouchstart={startViewGesture} ontouchend={endViewGesture} aria-label={`${views[viewIndex]} visualization`}>
     {#if message}<div class="instrument-status">{message}</div>{/if}
 
@@ -613,6 +621,19 @@
               </section>
             </div>
           </div>
+          {#if lyricsOpen && lyricsDocument}
+            <section class="cover-lyrics" aria-label="Lyrics" aria-live="polite" bind:this={lyricsScrollElement}>
+              {#if lyricsDocument.syncLevel === 'none'}
+                <div class="plain-lyrics">{lyricsDocument.plainText}</div>
+              {:else}
+                <div class="timed-lyrics">
+                  {#each lyricsDocument.cues as cue, index (cue.id ?? cue.position)}
+                    <p class:current={index === activeLyricIndex} data-lyric-index={index}>{cue.text}</p>
+                  {/each}
+                </div>
+              {/if}
+            </section>
+          {/if}
           <div class="instrument-copy">
             <span class="eyebrow">{selected.releaseDate ?? 'Undated'}{selected.label ? ` · ${selected.label}` : ''}</span>
             <h1>{selected.albumTitle ?? selected.workTitle}</h1>
@@ -653,20 +674,8 @@
     {#if selected?.hasLyrics}
       <button class:active={lyricsOpen} class="lyrics-toggle" onclick={toggleLyrics} disabled={lyricsLoading} title="Toggle lyrics" aria-label="Toggle lyrics">
         <svg viewBox="0 0 32 32" aria-hidden="true"><path d="M7 9h18M7 15h14M7 21h10" /><path d="M23 20c0 3-1.8 5-5 5 2.1-1.5 2.8-3 2.8-5H23Z" /></svg>
+        <span>LYRICS</span>
       </button>
-    {/if}
-    {#if lyricsOpen && lyricsDocument}
-      <section class="lyrics-overlay" aria-label="Lyrics" aria-live="polite">
-        {#if lyricsDocument.syncLevel === 'none'}
-          <div class="plain-lyrics">{lyricsDocument.plainText}</div>
-        {:else}
-          <div class="timed-lyrics">
-            {#each visibleLyricCues as cue, index (cue.id ?? cue.position)}
-              <p class:current={index === 0 && activeLyricIndex >= 0}>{cue.text}</p>
-            {/each}
-          </div>
-        {/if}
-      </section>
     {/if}
     {#if $currentPlayback}
       <button 
