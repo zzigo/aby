@@ -1,6 +1,6 @@
 import { LyricsEditSchema } from '@zztt/aby-domain';
 import { api, AbyError, jsonBody, ownerFor } from '$lib/server/errors';
-import { findLrclibLyrics, parseLrc, plainLyricsFromLrc } from '$lib/server/lrclib';
+import { findLrclibLyrics, looksLikeLrc, parseLrc, plainLyricsFromLrc } from '$lib/server/lrclib';
 import { getRepository } from '$lib/server/repository';
 import type { RequestHandler } from './$types';
 
@@ -11,7 +11,7 @@ export const GET: RequestHandler = (event) => api('asset.lyrics.detail', async (
 export const POST: RequestHandler = (event) => api('asset.lyrics.lrclib', async () => {
   const item = await getRepository().getCatalogItem(ownerFor(event), event.params.id);
   if (!item) throw new AbyError('asset_not_found', 'Asset not found', 404);
-  const artistName = item.creator?.trim() || item.albumArtist?.trim();
+  const artistName = item.albumArtist?.trim() || item.creator?.trim();
   const albumName = item.albumTitle?.trim();
   if (!artistName || !albumName) {
     throw new AbyError('lyrics_signature_incomplete', 'Add track artist and album before searching LRCLIB', 400);
@@ -38,8 +38,9 @@ export const POST: RequestHandler = (event) => api('asset.lyrics.lrclib', async 
 export const PUT: RequestHandler = (event) => api('asset.lyrics.save', async () => {
   const ownerId = ownerFor(event);
   const input = LyricsEditSchema.parse(await jsonBody(event));
-  const syncedLyrics = input.syncedLyrics?.trim() || null;
-  const plainText = input.plainLyrics.trim() || (syncedLyrics ? plainLyricsFromLrc(syncedLyrics) : '');
+  const submittedPlainText = input.plainLyrics.trim();
+  const syncedLyrics = input.syncedLyrics?.trim() || (looksLikeLrc(submittedPlainText) ? submittedPlainText : null);
+  const plainText = syncedLyrics ? plainLyricsFromLrc(syncedLyrics) : submittedPlainText;
   const cues = syncedLyrics
     ? parseLrc(syncedLyrics)
     : plainText.split(/\r?\n/).map((text) => text.trim()).filter(Boolean).slice(0, 5000).map((text, position) => ({

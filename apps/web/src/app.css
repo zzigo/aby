@@ -79,13 +79,16 @@ audio { display: none; }
 .instrument-stage { position: relative; min-height: calc(100svh - 64px); display: grid; place-items: center; padding: 0 52px 60px; touch-action: pan-y; overflow: hidden; }
 .signal-active .instrument-stage { padding-right: 0; padding-left: 0; }
 .instrument-status { position: absolute; z-index: 4; top: 14px; left: 18px; max-width: calc(100% - 36px); color: #ff8e78; font: 11px ui-monospace,monospace; }
-.cover-view { width: min(1180px, 92vw); display: grid; grid-template-columns: minmax(280px, 68vh) minmax(260px, 1fr); gap: clamp(28px, 7vw, 110px); align-items: center; perspective:1400px; }
-.cover-flip { position: relative; aspect-ratio: 1; width: 100%; transform: translateZ(0); transform-style: preserve-3d; -webkit-transform-style: preserve-3d; will-change: transform; transition: transform .62s cubic-bezier(.2,.8,.2,1); }
-.cover-flip.flipped { transform: rotateY(180deg) scale(.985); }
-.cover-touch { position: absolute; inset: 0; aspect-ratio: 1; width: 100%; padding: 0; overflow: hidden; border: 0; background: #171817; color: #fff; box-shadow: none; transform: rotateY(0deg) translateZ(1px); backface-visibility: hidden; -webkit-backface-visibility: hidden; }
-.cover-back { position: absolute; inset: 0; padding: clamp(12px,2vw,24px); overflow-x:hidden;overflow-y:auto;overscroll-behavior:contain;-webkit-overflow-scrolling:touch;border:0;background:#151714;color:#fff;transform:rotateY(180deg) translateZ(1px);backface-visibility:hidden;-webkit-backface-visibility:hidden;text-align:left;scrollbar-width:thin; }
-.cover-back dl{margin:0;display:grid;gap:6px}.cover-back dl>div{display:grid;grid-template-columns:66px 1fr;gap:9px;padding-bottom:5px;border-bottom:1px solid #30332e}.cover-back dt{color:var(--muted);font:10px ui-monospace,monospace;text-transform:uppercase;letter-spacing:.1em}.cover-back dd{margin:0;font:13px/1.4 ui-monospace,monospace;overflow-wrap:anywhere}.cover-back .notes{grid-template-columns:1fr}.cover-back .notes dd{color:#c7cbc2;white-space:pre-wrap}
-.flip-back-control{position:sticky;z-index:2;top:0;margin:0 0 4px auto;width:32px;height:32px;padding:0;display:grid;place-items:center;border:0;background:#151714e6;color:#a4a89f;opacity:.65}.flip-back-control svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.35;stroke-linecap:round;stroke-linejoin:round}.flip-back-control:hover:not(:disabled),.flip-back-control:focus-visible{transform:none;opacity:1;color:#fff}
+.cover-view { width: min(1180px, 92vw); display: grid; grid-template-columns: minmax(280px, 68vh) minmax(260px, 1fr); gap: clamp(28px, 7vw, 110px); align-items: center; }
+.cover-flip { position: relative; aspect-ratio: 1; width: 100%; perspective: 1200px; touch-action: manipulation; }
+.cover-flip__inner { position: relative; width: 100%; height: 100%; transform-style: preserve-3d; -webkit-transform-style: preserve-3d; transition: transform 620ms cubic-bezier(.2,.75,.25,1),filter 620ms ease; will-change: transform; }
+.cover-flip[data-flipped="true"] .cover-flip__inner { transform: rotateY(180deg); }
+.cover-flip__face { position: absolute; inset: 0; overflow: hidden; border: 0; backface-visibility: hidden; -webkit-backface-visibility: hidden; }
+.cover-touch { aspect-ratio: 1; width: 100%; padding: 0; background: #171817; color: #fff; box-shadow: none; transform: rotateY(0deg); }
+.cover-back { padding: clamp(10px,1.5vw,18px); overflow-x:hidden;overflow-y:auto;overscroll-behavior:contain;-webkit-overflow-scrolling:touch;background:linear-gradient(145deg,#181a17fa,#070807fa);color:#fff;transform:rotateY(180deg);text-align:left;scrollbar-width:thin; }
+.cover-back dl{margin:0;display:grid;gap:6px}.cover-back dl>div{display:grid;grid-template-columns:66px 1fr;gap:9px;padding-bottom:5px;border-bottom:1px solid #30332e}.cover-back dt{color:var(--muted);font:10px ui-monospace,monospace;text-transform:uppercase;letter-spacing:.1em}.cover-back dd{margin:0;font:15px/1.42 ui-monospace,monospace;overflow-wrap:anywhere}.cover-back .notes,.cover-back .back-lyrics{grid-template-columns:1fr}.cover-back .notes dd{color:#c7cbc2;white-space:pre-wrap}.cover-back .back-lyrics dd{max-height:220px;overflow:auto;color:#eef0e9;white-space:pre-wrap;font:italic 16px/1.5 Georgia,'Times New Roman',serif}
+.cover-flip__button{position:sticky;z-index:3;top:0;margin:0 0 4px auto;width:32px;height:32px;padding:0;display:grid;place-items:center;border:0;background:#111310c7;color:#a4a89f;opacity:.65;font-size:25px;line-height:1}.flip-back-control:hover:not(:disabled),.flip-back-control:focus-visible{transform:none;opacity:1;color:#fff}.cover-info{position:absolute;z-index:2;top:14px;right:14px;display:grid;place-items:center;width:34px;height:34px;background:#0a0b0a7a;color:#fff;opacity:.55;font:18px Georgia,serif;backdrop-filter:blur(12px)}
+.cover-edit-control{display:none;position:sticky;z-index:3;top:0;float:left;width:34px;height:32px;margin-top:-36px;padding:0;border:0;background:transparent;color:#fff;opacity:.4;font-size:19px}.cover-back-nav{display:flex;gap:8px;margin-top:14px}.cover-back-nav button{padding:8px 10px;border:0;background:#242720;color:#d7dad2;font:10px ui-monospace,monospace;text-transform:uppercase;letter-spacing:.08em}
 .cover-touch img { width: 100%; height: 100%; display: block; object-fit: cover; }
 .cover-touch:hover:not(:disabled),.cover-touch:focus-visible { transform: rotateY(0deg) translateZ(1px); }
 .cover-fallback { height: 100%; padding: 10%; display: flex; flex-direction: column; justify-content: space-between; text-align: left; background: linear-gradient(145deg, #242720, #111210 65%); }
@@ -174,6 +177,7 @@ audio { display: none; }
   .signal-active .instrument-stage { padding-right: 0; padding-left: 0; }
   .cover-view { width: min(88vw, 620px); grid-template-columns: 1fr; gap: 24px; }
   .cover-flip { width: min(74vw, 48vh); justify-self: center; }
+  .cover-edit-control { display:grid;place-items:center; }
   .instrument-copy { text-align: center; }
   .instrument-copy h1 { margin-top: 10px; font-size: clamp(38px, 12vw, 66px); }
   .instrument-copy p { margin-top: 12px; font-size: 16px; }

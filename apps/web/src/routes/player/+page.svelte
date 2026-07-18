@@ -287,6 +287,10 @@
         const endMs = $currentPlaybackTimeMs;
         const startMs = Math.max(0, endMs - 5000);
         if (endMs > startMs) await saveMobileSegment(startMs, endMs);
+      } else if (event.key.toLowerCase() === 'e' && $currentPlayback) {
+        event.preventDefault();
+        const playingItem = items.find((item) => item.asset.id === $currentPlayback?.assetId);
+        if (playingItem) editItem(playingItem);
       }
     };
     window.addEventListener('keydown', handleShortcut);
@@ -460,21 +464,38 @@
     } catch (error) { message = error instanceof Error ? error.message : 'Metadata refresh failed'; }
   }
 
-  async function toggleLyrics() {
-    if (lyricsOpen) { lyricsOpen = false; return; }
+  async function loadLyricsDocument(open: boolean) {
     if (!selected?.hasLyrics) return;
+    if (lyricsDocument) { lyricsOpen = open; return; }
+    const assetId = selected.asset.id;
     lyricsLoading = true;
     try {
-      const response = await fetch(`/api/assets/${selected.asset.id}/lyrics`);
+      const response = await fetch(`/api/assets/${assetId}/lyrics`);
       const body = await response.json();
       if (!response.ok) throw new Error(body.error?.message ?? 'Lyrics could not be loaded');
+      if (selected?.asset.id !== assetId) return;
       lyricsDocument = body.lyrics;
-      lyricsOpen = Boolean(lyricsDocument);
+      lyricsOpen = open && Boolean(lyricsDocument);
     } catch (error) {
       message = error instanceof Error ? error.message : 'Lyrics could not be loaded';
     } finally {
       lyricsLoading = false;
     }
+  }
+
+  async function toggleLyrics() {
+    if (lyricsOpen) { lyricsOpen = false; return; }
+    await loadLyricsDocument(true);
+  }
+
+  async function showCoverMetadata() {
+    coverFlipped = true;
+    if (selected?.hasLyrics && !lyricsDocument) await loadLyricsDocument(false);
+  }
+
+  function acceptLyrics(lyrics: TimedTextDocument) {
+    lyricsDocument = lyrics;
+    lyricsOpen = true;
   }
 
   let isPressing = $state(false);
@@ -563,33 +584,34 @@
     {#if selected}
       {#if viewIndex === 0}
         <div class="cover-view">
-          <div class:flipped={coverFlipped} class="cover-flip">
-            <button class="cover-touch cover-front" onclick={() => coverFlipped = true} aria-label={`Show metadata for ${selected.albumTitle ?? selected.workTitle}`}>
-              {#if selected.coverUrl}
-                <img src={selected.coverUrl} alt={`Cover for ${selected.albumTitle ?? selected.workTitle}`} />
-              {:else}
-                <span class="cover-fallback"><small>{selected.albumArtist ?? selected.creator ?? 'Aby'}</small><strong>{selected.albumTitle ?? selected.workTitle}</strong></span>
-              {/if}
-            </button>
-            <section class="cover-back" aria-label="Album metadata">
-              <button class="flip-back-control" onclick={() => coverFlipped = false} aria-label="Return to cover" title="Return to cover">
-                <svg viewBox="0 0 24 24" aria-hidden="true">
-                  <path d="M15.5 5.5 9 12l6.5 6.5" />
-                  <path d="M9.5 5.5H19v13H9.5" />
-                </svg>
+          <div class="cover-flip" data-flipped={coverFlipped ? 'true' : 'false'}>
+            <div class="cover-flip__inner">
+              <button class="cover-flip__face cover-flip__front cover-touch" onclick={showCoverMetadata} aria-label={`Show metadata for ${selected.albumTitle ?? selected.workTitle}`}>
+                {#if selected.coverUrl}
+                  <img src={selected.coverUrl} alt={`Cover for ${selected.albumTitle ?? selected.workTitle}`} draggable="false" />
+                {:else}
+                  <span class="cover-fallback"><small>{selected.albumArtist ?? selected.creator ?? 'Aby'}</small><strong>{selected.albumTitle ?? selected.workTitle}</strong></span>
+                {/if}
+                <span class="cover-info" aria-hidden="true">ⓘ</span>
               </button>
-              <dl>
-                <div><dt>Track</dt><dd>{displayTrackTitle(selected.recordingTitle, selected.trackNumber)}</dd></div>
-                <div><dt>Album</dt><dd>{selected.albumTitle ?? '—'}</dd></div>
-                <div><dt>Artist</dt><dd>{selected.albumArtist ?? selected.creator ?? '—'}</dd></div>
-                <div><dt>Work</dt><dd>{selected.workTitle}</dd></div>
-                <div><dt>Release</dt><dd>{selected.releaseDate ?? '—'}</dd></div>
-                <div><dt>Label</dt><dd>{selected.label ?? '—'}</dd></div>
-                <div><dt>Format</dt><dd>{formatTechnicalFormat(selected.asset.technicalMetadata)}</dd></div>
-                <div><dt>Length</dt><dd>{formatDuration(selected.asset.technicalMetadata.durationMs)}</dd></div>
-                <div class="notes"><dt>Notes</dt><dd>{selected.asset.canonicalMetadata.notes ?? selected.asset.canonicalMetadata.albumNotes ?? '—'}</dd></div>
-              </dl>
-            </section>
+              <section class="cover-flip__face cover-flip__back cover-back" aria-label="Album metadata">
+                <button class="cover-flip__button flip-back-control" onclick={() => coverFlipped = false} aria-label="Return to cover" title="Return to cover">×</button>
+                <button class="cover-edit-control" onclick={() => editItem(selected!)} aria-label={`Edit ${selected.recordingTitle}`} title="Edit track">✎</button>
+                <dl>
+                  <div><dt>Track</dt><dd>{displayTrackTitle(selected.recordingTitle, selected.trackNumber)}</dd></div>
+                  <div><dt>Album</dt><dd>{selected.albumTitle ?? '—'}</dd></div>
+                  <div><dt>Artist</dt><dd>{selected.albumArtist ?? selected.creator ?? '—'}</dd></div>
+                  <div><dt>Work</dt><dd>{selected.workTitle}</dd></div>
+                  <div><dt>Release</dt><dd>{selected.releaseDate ?? '—'}</dd></div>
+                  <div><dt>Label</dt><dd>{selected.label ?? '—'}</dd></div>
+                  <div><dt>Format</dt><dd>{formatTechnicalFormat(selected.asset.technicalMetadata)}</dd></div>
+                  <div><dt>Length</dt><dd>{formatDuration(selected.asset.technicalMetadata.durationMs)}</dd></div>
+                  <div class="notes"><dt>Notes</dt><dd>{selected.asset.canonicalMetadata.notes ?? selected.asset.canonicalMetadata.albumNotes ?? '—'}</dd></div>
+                  {#if selected.hasLyrics}<div class="back-lyrics"><dt>Plain lyrics</dt><dd>{lyricsDocument?.plainText ?? (lyricsLoading ? 'Loading…' : '—')}</dd></div>{/if}
+                </dl>
+                {#if selected.hasLyrics}<nav class="cover-back-nav"><button onclick={toggleLyrics}>Lyrics</button></nav>{/if}
+              </section>
+            </div>
           </div>
           <div class="instrument-copy">
             <span class="eyebrow">{selected.releaseDate ?? 'Undated'}{selected.label ? ` · ${selected.label}` : ''}</span>
@@ -751,7 +773,7 @@
 </main>
 
 {#if editingItem}
-  {#key editingItem.asset.id}<TrackEditor item={editingItem} onclose={() => editingItem = null} onsaved={replaceItem} />{/key}
+  {#key editingItem.asset.id}<TrackEditor item={editingItem} onclose={() => editingItem = null} onsaved={replaceItem} onlyrics={acceptLyrics} />{/key}
 {/if}
 {#if editingAlbumItems?.[0]}
   {#key editingAlbumItems[0].albumId}<AlbumEditor items={editingAlbumItems} onclose={() => editingAlbumItems = null} onsaved={replaceAlbumItems} />{/key}

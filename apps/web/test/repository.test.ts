@@ -156,7 +156,7 @@ describe('preview-before-write repository flow', () => {
       expect(item.albumArtist).toBe('Axel Dörner');
       expect(item.creator).toBe('Artist');
       expect(item.label).toBe('absinthRecords');
-      expect(item.coverUrl).toBe('https://i.discogs.com/sind.jpeg');
+      expect(item.coverUrl).toBe(`/api/assets/${item.asset.id}/cover?delivery=2&v=1229980`);
       expect(item.asset.canonicalMetadata.albumDurationMs).toBe(252_000);
       expect(item.asset.canonicalMetadata.albumTags).toEqual(['Free Improvisation']);
       expect(item.asset.canonicalMetadata.roles).toEqual([{ name: 'Axel Dörner', role: 'Trumpet' }]);

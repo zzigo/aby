@@ -50,6 +50,41 @@ export function plainLyricsFromLrc(value: string): string {
   return parseLrc(value).map((cue) => cue.text).join('\n');
 }
 
+export function looksLikeLrc(value: string): boolean {
+  return /\[\d{1,3}:\d{2}(?:[.:]\d{1,3})?\]/.test(value);
+}
+
+function normalized(value: string): string {
+  return value.normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toLocaleLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+}
+
+function selectSearchResult(records: LrclibRecord[], input: {
+  trackName: string;
+  artistName: string;
+  albumName: string;
+  durationSeconds: number;
+}): LrclibRecord | null {
+  const title = normalized(input.trackName);
+  const artist = normalized(input.artistName);
+  const album = normalized(input.albumName);
+  const ranked = records.map((record) => {
+    const recordTitle = normalized(record.trackName);
+    const recordArtist = normalized(record.artistName);
+    const recordAlbum = normalized(record.albumName);
+    const durationDelta = Math.abs(record.duration - input.durationSeconds);
+    const titleMatches = recordTitle === title;
+    const artistMatches = recordArtist === artist || recordArtist.includes(artist) || artist.includes(recordArtist);
+    const albumMatches = Boolean(album && recordAlbum === album);
+    return {
+      record,
+      eligible: titleMatches && artistMatches && durationDelta <= 8 && Boolean(record.plainLyrics || record.syncedLyrics || record.instrumental),
+      score: (titleMatches ? 60 : 0) + (recordArtist === artist ? 30 : artistMatches ? 18 : 0) + (albumMatches ? 20 : 0) - durationDelta
+    };
+  }).filter((candidate) => candidate.eligible).sort((left, right) => right.score - left.score);
+  return ranked[0]?.record ?? null;
+}
+
 export async function findLrclibLyrics(input: {
   trackName: string;
   artistName: string;
@@ -65,7 +100,17 @@ export async function findLrclibLyrics(input: {
     headers: { accept: 'application/json', 'user-agent': 'Aby/0.1.0 (https://aby.zztt.org)' },
     signal: AbortSignal.timeout(15_000)
   });
-  if (response.status === 404) return null;
+  if (response.status === 404) {
+    const searchUrl = new URL('https://lrclib.net/api/search');
+    searchUrl.searchParams.set('track_name', input.trackName);
+    searchUrl.searchParams.set('artist_name', input.artistName);
+    const searchResponse = await fetcher(searchUrl, {
+      headers: { accept: 'application/json', 'user-agent': 'Aby/0.1.0 (https://aby.zztt.org)' },
+      signal: AbortSignal.timeout(15_000)
+    });
+    if (!searchResponse.ok) throw new AbyError('lrclib_failed', `LRCLIB search failed with HTTP ${searchResponse.status}`, 502);
+    return selectSearchResult(await searchResponse.json() as LrclibRecord[], input);
+  }
   if (!response.ok) throw new AbyError('lrclib_failed', `LRCLIB request failed with HTTP ${response.status}`, 502);
   const record = await response.json() as LrclibRecord;
   if (!record.plainLyrics && !record.syncedLyrics && !record.instrumental) return null;

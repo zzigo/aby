@@ -1,9 +1,9 @@
 <script lang="ts">
   import { onMount, untrack } from 'svelte';
-  import type { CatalogItem } from '@zztt/aby-domain';
+  import type { CatalogItem, TimedTextDocument } from '@zztt/aby-domain';
   import MetadataQueryLab from './MetadataQueryLab.svelte';
 
-  let { item, onclose, onsaved }: { item: CatalogItem; onclose: () => void; onsaved: (item: CatalogItem) => void } = $props();
+  let { item, onclose, onsaved, onlyrics }: { item: CatalogItem; onclose: () => void; onsaved: (item: CatalogItem) => void; onlyrics?: (lyrics: TimedTextDocument) => void } = $props();
   let workTitle = $state(untrack(() => item.workTitle));
   let albumTitle = $state(untrack(() => item.albumTitle ?? ''));
   let recordingTitle = $state(untrack(() => item.recordingTitle));
@@ -84,6 +84,7 @@
           })
         });
         updated = lyricsBody.item;
+        onlyrics?.(lyricsBody.lyrics);
         lyricsDirty = false;
       }
       onsaved(updated); message = 'Saved';

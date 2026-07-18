@@ -5,6 +5,7 @@ import { extname, join } from 'node:path';
 import { api, AbyError, ownerFor } from '$lib/server/errors';
 import { getRepository } from '$lib/server/repository';
 import { artifactUrl, uploadWasabiArtifact } from '$lib/server/storage';
+import { preferredCoverCandidate } from '$lib/server/image-candidates';
 import type { RequestHandler } from './$types';
 
 const imageTypes: Record<string, string> = {
@@ -16,13 +17,35 @@ const imageTypes: Record<string, string> = {
 export const GET: RequestHandler = async (event) => {
   const item = await getRepository().getCatalogItem(ownerFor(event), event.params.id);
   if (!item) throw new AbyError('asset_not_found', 'Asset not found', 404);
-  const manual = item.asset.canonicalMetadata.imageCandidates?.find((candidate) => candidate.authority === 'manual-upload');
-  const objectKey = manual?.provenance?.artifactObjectKey;
-  if (!manual || typeof objectKey !== 'string') throw new AbyError('cover_not_found', 'Manual cover not found', 404);
-  const signed = await artifactUrl(objectKey, String(manual.provenance.contentType || 'image/jpeg'));
-  return new Response(null, {
-    status: 302,
-    headers: { location: signed.url, 'cache-control': 'private, no-store, max-age=0' }
+  const candidate = preferredCoverCandidate(item.asset.canonicalMetadata.imageCandidates);
+  if (!candidate) throw new AbyError('cover_not_found', 'Cover not found', 404);
+  const objectKey = candidate.provenance?.artifactObjectKey;
+  if (candidate.authority === 'manual-upload' && typeof objectKey === 'string') {
+    const signed = await artifactUrl(objectKey, String(candidate.provenance?.contentType || 'image/jpeg'));
+    return new Response(null, {
+      status: 302,
+      headers: { location: signed.url, 'cache-control': 'private, no-store, max-age=0' }
+    });
+  }
+
+  const source = new URL(candidate.url);
+  const allowedHosts = ['i.discogs.com', 'coverartarchive.org', 'archive.org', 'upload.wikimedia.org'];
+  if (!allowedHosts.some((host) => source.hostname === host || source.hostname.endsWith(`.${host}`))) {
+    throw new AbyError('cover_source_invalid', 'Cover source is not allowed', 400);
+  }
+  const response = await fetch(source, {
+    headers: { accept: 'image/avif,image/webp,image/jpeg,image/png', 'user-agent': 'Aby/0.1.0 (https://aby.zztt.org)' },
+    signal: AbortSignal.timeout(20_000)
+  });
+  const contentType = response.headers.get('content-type') ?? '';
+  if (!response.ok || !contentType.startsWith('image/') || !response.body) {
+    throw new AbyError('cover_source_failed', 'Cover source could not be loaded', 502);
+  }
+  return new Response(response.body, {
+    headers: {
+      'content-type': contentType,
+      'cache-control': 'private, max-age=86400, stale-while-revalidate=604800'
+    }
   });
 };
 

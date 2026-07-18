@@ -4,7 +4,7 @@ import type { AlbumEdit, Asset, CatalogItem, ConversionSettings, IngestPreview, 
 import { AbyError } from './errors';
 import { readConfig } from './config';
 import { parseTrackTitle } from './track-title';
-import { preferredCoverUrl } from './image-candidates';
+import { preferredCoverCandidate } from './image-candidates';
 
 export type TimedTextSaveInput = Omit<TimedTextDocument, 'id' | 'assetId' | 'createdAt' | 'updatedAt'>;
 
@@ -101,6 +101,13 @@ function albumReleaseFields(input: AlbumEdit, albumArtist: string | null | undef
     ...(input.notes !== undefined ? { albumNotes: input.notes } : {}),
     ...(input.collectionCode !== undefined ? { collectionCode: input.collectionCode.toUpperCase() } : {})
   };
+}
+
+function coverDeliveryUrl(asset: Asset): string | undefined {
+  const candidate = preferredCoverCandidate(asset.canonicalMetadata.imageCandidates);
+  if (!candidate) return undefined;
+  const version = encodeURIComponent(candidate.sourceId || candidate.url).slice(0, 96);
+  return `/api/assets/${asset.id}/cover?delivery=2&v=${version}`;
 }
 
 export class MemoryAbyRepository implements AbyRepository {
@@ -303,7 +310,7 @@ export class MemoryAbyRepository implements AbyRepository {
         ...(asset.canonicalMetadata.trackNumber ? { trackNumber: asset.canonicalMetadata.trackNumber } : {}),
         ...(asset.canonicalMetadata.creator ? { creator: asset.canonicalMetadata.creator } : {}),
         ...(asset.canonicalMetadata.albumArtist ? { albumArtist: asset.canonicalMetadata.albumArtist } : {}),
-        ...(preferredCoverUrl(asset.canonicalMetadata.imageCandidates) ? { coverUrl: preferredCoverUrl(asset.canonicalMetadata.imageCandidates) } : {}),
+        ...(coverDeliveryUrl(asset) ? { coverUrl: coverDeliveryUrl(asset) } : {}),
         ...(asset.canonicalMetadata.releaseDate ? { releaseDate: asset.canonicalMetadata.releaseDate } : {}),
         ...(asset.canonicalMetadata.label ? { label: asset.canonicalMetadata.label } : {}),
         hasLyrics: Boolean(this.#timedText.get(asset.id)?.some((document) => document.textType === 'lyrics')),
@@ -958,7 +965,7 @@ export class PostgresAbyRepository implements AbyRepository {
     );
     return result.rows.map((row) => {
       const asset = mapAsset(row);
-      const coverUrl = preferredCoverUrl(asset.canonicalMetadata.imageCandidates);
+      const coverUrl = coverDeliveryUrl(asset);
       return {
         asset,
         workTitle: asset.canonicalMetadata.title || row.work_title,
