@@ -286,6 +286,57 @@ export const CatalogSegmentSchema = z.object({
 });
 export type CatalogSegment = z.infer<typeof CatalogSegmentSchema>;
 
+export const TimedTextCueSchema = z.object({
+  id: IdentifierSchema.optional(),
+  position: z.number().int().nonnegative(),
+  startMs: z.number().int().nonnegative().nullable(),
+  endMs: z.number().int().positive().nullable(),
+  text: z.string().min(1).max(20_000),
+  speaker: z.string().max(500).nullable().optional(),
+  words: z.array(z.object({
+    text: z.string().min(1).max(500),
+    startMs: z.number().int().nonnegative(),
+    endMs: z.number().int().positive()
+  })).default([])
+});
+export type TimedTextCue = z.infer<typeof TimedTextCueSchema>;
+
+export const TimedTextDocumentSchema = z.object({
+  id: IdentifierSchema,
+  assetId: IdentifierSchema,
+  provider: z.string().min(1).max(100),
+  providerItemId: z.string().max(500).nullable().optional(),
+  textType: z.enum(['lyrics', 'subtitles', 'transcript']),
+  language: z.string().min(1).max(20),
+  originalFormat: z.enum(['plain', 'lrc', 'enhanced-lrc', 'srt', 'vtt', 'ass', 'ttml', 'json']),
+  syncLevel: z.enum(['none', 'line', 'word']),
+  originalText: z.string().max(1_000_000).nullable().optional(),
+  plainText: z.string().max(1_000_000),
+  offsetMs: z.number().int(),
+  timeScale: z.number().positive(),
+  matchConfidence: z.number().min(0).max(1).nullable().optional(),
+  humanVerified: z.boolean(),
+  licenseStatus: z.string().min(1).max(100),
+  retrievedAt: z.string().datetime(),
+  cues: z.array(TimedTextCueSchema),
+  createdAt: z.string().datetime(),
+  updatedAt: z.string().datetime()
+});
+export type TimedTextDocument = z.infer<typeof TimedTextDocumentSchema>;
+
+export const LyricsEditSchema = z.object({
+  plainLyrics: z.string().trim().max(1_000_000),
+  syncedLyrics: z.string().trim().max(1_000_000).nullable().optional(),
+  language: z.string().trim().min(1).max(20).default('und'),
+  provider: z.string().trim().min(1).max(100).default('manual'),
+  providerItemId: z.string().trim().max(500).nullable().optional(),
+  matchConfidence: z.number().min(0).max(1).nullable().optional(),
+  licenseStatus: z.string().trim().min(1).max(100).default('user-provided')
+}).refine((value) => value.plainLyrics.length > 0 || Boolean(value.syncedLyrics?.length), {
+  message: 'Add plain or synchronized lyrics'
+});
+export type LyricsEdit = z.infer<typeof LyricsEditSchema>;
+
 export const CatalogItemSchema = z.object({
   asset: AssetSchema,
   workTitle: z.string().min(1),
@@ -298,6 +349,7 @@ export const CatalogItemSchema = z.object({
   coverUrl: z.string().min(1).optional(),
   releaseDate: z.string().optional(),
   label: z.string().optional(),
+  hasLyrics: z.boolean().optional(),
   segments: z.array(CatalogSegmentSchema)
 });
 export type CatalogItem = z.infer<typeof CatalogItemSchema>;

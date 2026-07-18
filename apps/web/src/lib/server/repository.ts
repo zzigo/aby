@@ -1,9 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import pg from 'pg';
-import type { AlbumEdit, Asset, CatalogItem, ConversionSettings, IngestPreview, Provenance, Segment, SegmentCreate, TrackEdit } from '@zztt/aby-domain';
+import type { AlbumEdit, Asset, CatalogItem, ConversionSettings, IngestPreview, Provenance, Segment, SegmentCreate, TimedTextDocument, TrackEdit } from '@zztt/aby-domain';
 import { AbyError } from './errors';
 import { readConfig } from './config';
 import { parseTrackTitle } from './track-title';
+import { preferredCoverUrl } from './image-candidates';
+
+export type TimedTextSaveInput = Omit<TimedTextDocument, 'id' | 'assetId' | 'createdAt' | 'updatedAt'>;
 
 export interface SpectrogramSummary {
   descriptors: { energy: number; brightness: number; motion: number; gravity: number; tension: number };
@@ -57,6 +60,8 @@ export interface AbyRepository {
   getAsset(ownerId: string, assetId: string): Promise<Asset | null>;
   getSpectrogramAnalysis(ownerId: string, assetId: string): Promise<SpectrogramAnalysis | null>;
   saveSpectrogramAnalysis(ownerId: string, asset: Asset, input: Omit<SpectrogramAnalysis, 'id' | 'assetId' | 'sourceAssetChecksum' | 'createdAt'>): Promise<SpectrogramAnalysis>;
+  getTimedText(ownerId: string, assetId: string, textType: TimedTextDocument['textType']): Promise<TimedTextDocument | null>;
+  saveTimedText(ownerId: string, assetId: string, input: TimedTextSaveInput): Promise<TimedTextDocument>;
   createSegment(ownerId: string, input: SegmentCreate, provenance: Provenance): Promise<Segment>;
 }
 
@@ -85,6 +90,7 @@ export class MemoryAbyRepository implements AbyRepository {
   readonly #assets = new Map<string, Asset>();
   readonly #segments = new Map<string, Segment>();
   readonly #spectrograms = new Map<string, SpectrogramAnalysis>();
+  readonly #timedText = new Map<string, TimedTextDocument[]>();
   readonly #settings = new Map<string, ConversionSettings>();
 
   async savePreview(preview: IngestPreview): Promise<IngestPreview> {
@@ -249,6 +255,24 @@ export class MemoryAbyRepository implements AbyRepository {
     return structuredClone(analysis);
   }
 
+  async getTimedText(ownerId: string, assetId: string, textType: TimedTextDocument['textType']): Promise<TimedTextDocument | null> {
+    if (!await this.getAsset(ownerId, assetId)) return null;
+    const current = this.#timedText.get(assetId)?.findLast((document) => document.textType === textType);
+    return current ? structuredClone(current) : null;
+  }
+
+  async saveTimedText(ownerId: string, assetId: string, input: TimedTextSaveInput): Promise<TimedTextDocument> {
+    if (!await this.getAsset(ownerId, assetId)) throw new AbyError('asset_not_found', 'Asset not found', 404);
+    const now = new Date().toISOString();
+    const document: TimedTextDocument = {
+      id: randomUUID(), assetId, ...input,
+      cues: input.cues.map((cue, position) => ({ ...cue, id: cue.id ?? randomUUID(), position })),
+      createdAt: now, updatedAt: now
+    };
+    this.#timedText.set(assetId, [...(this.#timedText.get(assetId) ?? []), document]);
+    return structuredClone(document);
+  }
+
   async listCatalog(ownerId: string): Promise<CatalogItem[]> {
     return [...this.#assets.values()]
       .filter((asset) => asset.ownerId === ownerId)
@@ -261,9 +285,10 @@ export class MemoryAbyRepository implements AbyRepository {
         ...(asset.canonicalMetadata.trackNumber ? { trackNumber: asset.canonicalMetadata.trackNumber } : {}),
         ...(asset.canonicalMetadata.creator ? { creator: asset.canonicalMetadata.creator } : {}),
         ...(asset.canonicalMetadata.albumArtist ? { albumArtist: asset.canonicalMetadata.albumArtist } : {}),
-        ...(asset.canonicalMetadata.imageCandidates?.[0]?.url ? { coverUrl: asset.canonicalMetadata.imageCandidates[0].url } : {}),
+        ...(preferredCoverUrl(asset.canonicalMetadata.imageCandidates) ? { coverUrl: preferredCoverUrl(asset.canonicalMetadata.imageCandidates) } : {}),
         ...(asset.canonicalMetadata.releaseDate ? { releaseDate: asset.canonicalMetadata.releaseDate } : {}),
         ...(asset.canonicalMetadata.label ? { label: asset.canonicalMetadata.label } : {}),
+        hasLyrics: Boolean(this.#timedText.get(asset.id)?.some((document) => document.textType === 'lyrics')),
         segments: [...this.#segments.values()]
           .filter((segment) => segment.ownerId === ownerId && segment.assetId === asset.id)
           .map((segment) => ({
@@ -794,10 +819,90 @@ export class PostgresAbyRepository implements AbyRepository {
     }
   }
 
+  async getTimedText(ownerId: string, assetId: string, textType: TimedTextDocument['textType']): Promise<TimedTextDocument | null> {
+    const result = await this.#pool.query(
+      `SELECT tt.* FROM aby.timed_text_documents tt
+       JOIN aby.assets a ON a.id=tt.asset_id AND a.owner_id=tt.owner_id
+       WHERE tt.owner_id=$1 AND tt.asset_id=$2 AND tt.text_type=$3 AND tt.is_current
+       ORDER BY tt.created_at DESC LIMIT 1`,
+      [ownerId, assetId, textType]
+    );
+    const row = result.rows[0];
+    if (!row) return null;
+    const cues = await this.#pool.query(
+      'SELECT * FROM aby.timed_text_cues WHERE document_id=$1 ORDER BY position', [row.id]
+    );
+    return {
+      id: row.id, assetId: row.asset_id, provider: row.provider,
+      providerItemId: row.provider_item_id ?? null, textType: row.text_type,
+      language: row.language, originalFormat: row.original_format, syncLevel: row.sync_level,
+      originalText: row.original_text ?? null, plainText: row.plain_text,
+      offsetMs: Number(row.offset_ms), timeScale: Number(row.time_scale),
+      matchConfidence: row.match_confidence === null ? null : Number(row.match_confidence),
+      humanVerified: row.human_verified, licenseStatus: row.license_status,
+      retrievedAt: new Date(row.retrieved_at).toISOString(),
+      cues: cues.rows.map((cue) => ({
+        id: cue.id, position: cue.position,
+        startMs: cue.start_ms === null ? null : Number(cue.start_ms),
+        endMs: cue.end_ms === null ? null : Number(cue.end_ms),
+        text: cue.text, speaker: cue.speaker ?? null, words: cue.words ?? []
+      })),
+      createdAt: new Date(row.created_at).toISOString(), updatedAt: new Date(row.updated_at).toISOString()
+    };
+  }
+
+  async saveTimedText(ownerId: string, assetId: string, input: TimedTextSaveInput): Promise<TimedTextDocument> {
+    const client = await this.#pool.connect();
+    const documentId = randomUUID();
+    try {
+      await client.query('BEGIN');
+      const asset = await client.query(
+        "SELECT id FROM aby.assets WHERE id=$1 AND owner_id=$2 AND state='active' FOR SHARE", [assetId, ownerId]
+      );
+      if (!asset.rows[0]) throw new AbyError('asset_not_found', 'Asset not found', 404);
+      await client.query(
+        'UPDATE aby.timed_text_documents SET is_current=false,updated_at=now() WHERE owner_id=$1 AND asset_id=$2 AND text_type=$3 AND is_current',
+        [ownerId, assetId, input.textType]
+      );
+      const provenance = {
+        method: input.humanVerified ? 'human' : 'imported', source: input.provider, actorId: ownerId,
+        parameters: { providerItemId: input.providerItemId ?? null, originalFormat: input.originalFormat },
+        timestamp: input.retrievedAt, reviewState: input.humanVerified ? 'accepted' : 'candidate'
+      };
+      await client.query(
+        `INSERT INTO aby.timed_text_documents
+         (id,owner_id,asset_id,provider,provider_item_id,text_type,language,original_format,sync_level,original_text,plain_text,
+          offset_ms,time_scale,match_confidence,human_verified,license_status,retrieved_at,provenance,is_current)
+         VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,true)`,
+        [documentId, ownerId, assetId, input.provider, input.providerItemId ?? null, input.textType, input.language,
+          input.originalFormat, input.syncLevel, input.originalText ?? null, input.plainText, input.offsetMs, input.timeScale,
+          input.matchConfidence ?? null, input.humanVerified, input.licenseStatus, input.retrievedAt, provenance]
+      );
+      for (const [position, cue] of input.cues.entries()) {
+        await client.query(
+          `INSERT INTO aby.timed_text_cues(id,document_id,position,start_ms,end_ms,text,speaker,words)
+           VALUES($1,$2,$3,$4,$5,$6,$7,$8)`,
+          [cue.id ?? randomUUID(), documentId, position, cue.startMs, cue.endMs, cue.text, cue.speaker ?? null, cue.words]
+        );
+      }
+      await client.query('COMMIT');
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+    const saved = await this.getTimedText(ownerId, assetId, input.textType);
+    if (!saved) throw new AbyError('timed_text_not_saved', 'Timed text could not be saved', 500);
+    return saved;
+  }
+
   async listCatalog(ownerId: string): Promise<CatalogItem[]> {
     const result = await this.#pool.query(
       `SELECT a.*,r.title AS recording_title,r.work_id,r.album_id,r.metadata AS recording_metadata,
         w.title AS work_title,al.title AS album_title,
+        EXISTS(SELECT 1 FROM aby.timed_text_documents tt
+          WHERE tt.owner_id=a.owner_id AND tt.asset_id=a.id AND tt.text_type='lyrics' AND tt.is_current) AS has_lyrics,
         COALESCE(jsonb_agg(jsonb_build_object(
           'id',s.id,
           'startTimeMs',s.start_time_ms,
@@ -817,7 +922,7 @@ export class PostgresAbyRepository implements AbyRepository {
     );
     return result.rows.map((row) => {
       const asset = mapAsset(row);
-      const imageCandidate = asset.canonicalMetadata.imageCandidates?.[0];
+      const coverUrl = preferredCoverUrl(asset.canonicalMetadata.imageCandidates);
       return {
         asset,
         workTitle: asset.canonicalMetadata.title || row.work_title,
@@ -827,9 +932,10 @@ export class PostgresAbyRepository implements AbyRepository {
         ...(asset.canonicalMetadata.trackNumber || row.recording_metadata?.trackNumber ? { trackNumber: Number(asset.canonicalMetadata.trackNumber || row.recording_metadata.trackNumber) } : {}),
         ...(asset.canonicalMetadata.creator ? { creator: asset.canonicalMetadata.creator } : {}),
         ...(asset.canonicalMetadata.albumArtist ? { albumArtist: asset.canonicalMetadata.albumArtist } : {}),
-        ...(imageCandidate?.url ? { coverUrl: imageCandidate.url } : {}),
+        ...(coverUrl ? { coverUrl } : {}),
         ...(asset.canonicalMetadata.releaseDate ? { releaseDate: asset.canonicalMetadata.releaseDate } : {}),
         ...(asset.canonicalMetadata.label ? { label: asset.canonicalMetadata.label } : {}),
+        hasLyrics: Boolean(row.has_lyrics),
         segments: row.segments.map((segment: { id: string; startTimeMs: number | string; endTimeMs: number | string; label?: string | null; sourceContext?: string }) => ({
           id: segment.id,
           startTimeMs: Number(segment.startTimeMs),

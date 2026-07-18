@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { api, AbyError, jsonBody, ownerFor } from '$lib/server/errors';
 import { getDiscogsRelease, searchDiscogsRelease } from '$lib/server/discogs';
 import { getRepository } from '$lib/server/repository';
+import { mergeImageCandidates } from '$lib/server/image-candidates';
 import type { RequestHandler } from './$types';
 
 export const POST: RequestHandler = (event) => api('album.metadata.discogs', async () => {
@@ -35,12 +36,10 @@ export const PUT: RequestHandler = (event) => api('album.metadata.discogs.apply'
   const items = (await repository.listCatalog(ownerId)).filter((item) => item.albumId === event.params.id);
   const first = items[0];
   if (!first) throw new AbyError('album_not_found', 'Album not found', 404);
-  const prior = first.asset.canonicalMetadata.imageCandidates
-    ?.filter((image) => image.authority !== 'discogs') ?? [];
-  const imageCandidates = candidate.coverUrl ? [{
+  const imageCandidates = candidate.coverUrl ? mergeImageCandidates([{
     authority: 'discogs', url: candidate.coverUrl, kind: 'cover' as const, exactRelease: true,
     sourceId: candidate.id, provenance: { canonicalUrl: candidate.canonicalUrl }
-  }, ...prior] : prior;
+  }], first.asset.canonicalMetadata.imageCandidates) : first.asset.canonicalMetadata.imageCandidates ?? [];
   const fetchedAt = new Date().toISOString();
   const albumTags = [...new Set([
     ...(first.asset.canonicalMetadata.albumTags ?? []),

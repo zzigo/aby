@@ -14,6 +14,7 @@ import {
 } from './musicbrainz';
 import type { AbyRepository } from './repository';
 import { downloadWasabiObject } from './storage';
+import { mergeImageCandidates } from './image-candidates';
 
 export async function regenerateAssetMetadata(ownerId: string, assetId: string, repository: AbyRepository): Promise<CatalogItem> {
   const current = await repository.getCatalogItem(ownerId, assetId);
@@ -69,10 +70,10 @@ export async function regenerateAssetMetadata(ownerId: string, assetId: string, 
         }]
       } : {}),
       ...(cover ? {
-        imageCandidates: [{
+        imageCandidates: mergeImageCandidates([{
           authority: 'cover-art-archive', url: cover.url, kind: 'cover', exactRelease: cover.exactRelease,
           sourceId: cover.sourceId, provenance: { sourceRelease: cover.sourceRelease, fallback: cover.exactRelease ? 'exact-release' : 'release-group-search' }
-        }]
+        }], current.asset.canonicalMetadata.imageCandidates)
       } : {}),
       ...(wikidata ? { wikidata } : {}),
       metadataRegeneratedAt: new Date().toISOString(),

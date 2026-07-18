@@ -309,6 +309,25 @@
       busy = false;
     }
   }
+
+  async function pasteCover() {
+    if (!navigator.clipboard?.read) { message = 'Clipboard images are not available in this browser'; return; }
+    try {
+      const clipboardItems = await navigator.clipboard.read();
+      for (const clipboardItem of clipboardItems) {
+        const imageType = clipboardItem.types.find((type) => ['image/jpeg', 'image/png', 'image/webp'].includes(type));
+        if (!imageType) continue;
+        const blob = await clipboardItem.getType(imageType);
+        const extension = imageType.split('/')[1]?.replace('jpeg', 'jpg') ?? 'png';
+        await uploadCover(new File([blob], `clipboard-cover.${extension}`, { type: imageType }));
+        return;
+      }
+      message = 'Clipboard does not contain a JPEG, PNG or WebP image';
+    } catch (error) {
+      message = error instanceof Error ? error.message : 'Clipboard image could not be read';
+    }
+  }
+
 </script>
 
 {#if first}
@@ -343,7 +362,7 @@
       </section>
 
       <section class="cover-section">
-        <div class="section-title"><h2>Cover</h2><button onclick={refreshDiscogs} disabled={busy}>↻ Discogs</button></div>
+        <div class="section-title"><h2>Cover</h2><div class="cover-actions"><button onclick={pasteCover} disabled={busy}>Paste image</button><button onclick={refreshDiscogs} disabled={busy}>↻ Discogs</button></div></div>
         <label class="drop" ondragover={(event) => event.preventDefault()} ondrop={(event) => { event.preventDefault(); uploadCover(event.dataTransfer?.files[0]); }}>
           {#if first.coverUrl}<img src={first.coverUrl} alt={`Cover for ${title}`} />{:else}<span>DROP IMAGE</span>{/if}
           <input type="file" accept="image/jpeg,image/png,image/webp" onchange={(event) => uploadCover(event.currentTarget.files?.[0])} />
@@ -445,5 +464,6 @@
   header,footer{display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid #30332e}footer{border-top:1px solid #30332e;border-bottom:0;gap:20px}footer>div{display:grid;gap:5px;max-width:760px}h1,h2{margin:0}h1{font-size:clamp(18px,3vw,32px);font-weight:500}h2{font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:#9ba394;margin-bottom:14px}small{color:#7f867b}.close{font-size:36px;border:0;background:none;color:#fff}.album-editor>main{width:100%;min-height:0;margin:0;padding:0;overflow:auto;display:grid;grid-template-columns:minmax(0,2fr) minmax(260px,1fr)}section{padding:20px;border-right:1px solid #30332e;border-bottom:1px solid #30332e}.canonical,.tracks,.embedded{grid-column:1}.cover-section,.discogs{grid-column:2}.discogs,.embedded{background:#151a14}.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.grid label{font-size:10px;color:#9ba394}.grid input,.grid textarea{display:block;width:100%;box-sizing:border-box;margin-top:5px;background:#111310;color:#fff;border:1px solid #30332e;padding:11px;font:inherit}.grid textarea{min-height:110px;resize:vertical}.dependencies{display:flex;flex-wrap:wrap;gap:8px;margin-top:18px}.dependencies span{font-size:9px;color:#737a70;border:1px solid #30332e;padding:6px}.drop{min-height:260px;display:grid;place-items:center;border:1px dashed #596052;cursor:pointer;overflow:hidden}.drop img{width:100%;height:100%;max-height:420px;object-fit:contain}.drop input{display:none}.section-title{display:flex;justify-content:space-between;align-items:start;gap:12px}.section-title button,footer button,.discogs .apply{border:1px solid #4a5047;background:#111310;color:#fff;padding:9px 13px;font:inherit;font-size:10px}.tracks ol{list-style:none;padding:0;margin:0}.tracks li{display:grid;grid-template-columns:44px 1fr auto;gap:10px;padding:10px 0;border-bottom:1px solid #252823;font-size:11px}.tracks li>span,.tracks li>small{color:#7f867b}.tracks li>strong{font-weight:500}.embedded dl,.discogs dl{display:grid;grid-template-columns:90px 1fr;gap:8px;font-size:11px}.embedded dt,.discogs dt{color:#7f867b}.embedded dd,.discogs dd{margin:0;overflow-wrap:anywhere}.embedded .conflict,.warning{color:#ff9b7a}.discogs-query{display:grid;grid-template-columns:1fr 1.4fr 64px;gap:6px;margin-bottom:14px}.discogs-query input{min-width:0;background:#0d0f0d;color:#fff;border:1px solid #353a32;padding:8px;font:9px ui-monospace,monospace}.discogs a{display:inline-block;margin-top:14px;color:#c8ff52;font-size:10px}.discogs p{font-size:11px;color:#7f867b}.discogs .apply{width:100%;margin-top:14px;background:#c8ff52;color:#10110f}.save{background:#c8ff52!important;color:#10110f!important}footer span{font-size:10px;color:#c8ff52}footer small{font-size:8px;line-height:1.35}
   .wide-field{grid-column:1/-1}.duration-compare{display:flex;gap:8px;margin-top:10px}.duration-compare span{font-size:9px;color:#7f867b}.roles-section{grid-column:1}.roles{display:grid;gap:6px}.role-row{display:grid;grid-template-columns:1.4fr 1fr .7fr 34px;gap:6px}.role-row input{min-width:0;background:#0d0f0d;color:#fff;border:1px solid #353a32;padding:8px;font:9px ui-monospace,monospace}.role-row button,.descriptors button{border:1px solid #4a5047;background:#111310;color:#fff;font:9px ui-monospace,monospace}.descriptors{grid-column:2;background:#151a14}.descriptors h3{margin:16px 0 7px;color:#7f867b;font-size:9px;text-transform:uppercase}.tag-list{display:flex;flex-wrap:wrap;gap:5px}.tag-list button{padding:6px 8px}.tag-list button.linked{border-color:#c8ff52;color:#c8ff52}.tag-list.legacy button{color:#9b9f98}.descriptors p{font-size:9px;color:#7f867b;line-height:1.5}.canonical-tags button{background:#c8ff52;color:#10110f}.footer-actions{display:flex!important;gap:8px;max-width:none!important}
   .relocation-actions{display:flex;flex-wrap:wrap;gap:7px;margin-top:12px}.relocation-actions button{border:1px solid var(--signal);background:transparent;color:var(--signal);padding:8px;font:9px ui-monospace,monospace}.relocation-actions .retire{border-color:#ff8e78;color:#ff8e78}
+  .cover-actions{display:flex;gap:5px}
   @media(max-width:720px){.album-editor>main{display:block}.grid{grid-template-columns:1fr}.album-editor header,.album-editor footer{padding:12px}.album-editor section{padding:14px;border-right:0}.drop{min-height:190px}footer>div{max-width:65%}footer small{display:none}}
 </style>

@@ -39,6 +39,30 @@ describe('preview-before-write repository flow', () => {
     expect(await repository.getAsset('owner-b', asset.id)).toBeNull();
   });
 
+  test('stores lyrics as revisioned timed text without bloating catalog rows', async () => {
+    const repository = new MemoryAbyRepository();
+    const preview = await repository.savePreview(fixturePreview());
+    const asset = await repository.commitPreview('owner-a', preview.id, 'Work', 'Song', 'Album', 'Artist');
+    const retrievedAt = new Date().toISOString();
+    await repository.saveTimedText('owner-a', asset.id, {
+      provider: 'lrclib', providerItemId: '12', textType: 'lyrics', language: 'en',
+      originalFormat: 'lrc', syncLevel: 'line', originalText: '[00:01.00] First', plainText: 'First',
+      offsetMs: 0, timeScale: 1, matchConfidence: 0.98, humanVerified: true,
+      licenseStatus: 'external-provider', retrievedAt,
+      cues: [{ position: 0, startMs: 1000, endMs: null, text: 'First', speaker: null, words: [] }]
+    });
+    await repository.saveTimedText('owner-a', asset.id, {
+      provider: 'manual', providerItemId: null, textType: 'lyrics', language: 'en',
+      originalFormat: 'plain', syncLevel: 'none', originalText: 'Corrected', plainText: 'Corrected',
+      offsetMs: 0, timeScale: 1, matchConfidence: null, humanVerified: true,
+      licenseStatus: 'user-provided', retrievedAt, cues: []
+    });
+    expect((await repository.getTimedText('owner-a', asset.id, 'lyrics'))?.plainText).toBe('Corrected');
+    const [item] = await repository.listCatalog('owner-a');
+    expect(item?.hasLyrics).toBe(true);
+    expect('plainText' in (item as unknown as Record<string, unknown>)).toBe(false);
+  });
+
   test('keeps an optional album between work and track and supports soft deletion', async () => {
     const repository = new MemoryAbyRepository();
     const preview = await repository.savePreview(fixturePreview());

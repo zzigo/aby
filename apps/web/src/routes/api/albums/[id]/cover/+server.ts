@@ -2,7 +2,6 @@ import { createHash } from 'node:crypto';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { redirect } from '@sveltejs/kit';
 import { api, AbyError, ownerFor } from '$lib/server/errors';
 import { getRepository } from '$lib/server/repository';
 import { artifactUrl, uploadWasabiArtifact } from '$lib/server/storage';
@@ -27,7 +26,10 @@ export const GET: RequestHandler = async (event) => {
   const objectKey = manual?.provenance?.artifactObjectKey;
   if (!manual || typeof objectKey !== 'string') throw new AbyError('cover_not_found', 'Manual cover not found', 404);
   const signed = await artifactUrl(objectKey, String(manual.provenance.contentType || 'image/jpeg'));
-  redirect(302, signed.url);
+  return new Response(null, {
+    status: 302,
+    headers: { location: signed.url, 'cache-control': 'private, no-store, max-age=0' }
+  });
 };
 
 export const POST: RequestHandler = async (event) => api('album.cover.upload', async () => {

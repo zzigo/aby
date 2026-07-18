@@ -99,6 +99,8 @@ audio { display: none; }
 .side-navigation.previous{left:0}.side-navigation.next{right:0}.side-navigation.album{top:28%}.side-navigation.visualization{top:50%}.side-navigation.track{top:72%}
 .side-navigation svg{width:29px;height:29px;fill:none;stroke:currentColor;stroke-width:1.35;stroke-linecap:round;stroke-linejoin:round}.side-navigation.visualization svg{width:31px;height:31px}
 .side-navigation:hover:not(:disabled),.side-navigation:focus-visible{opacity:.72;color:#e1e3dd;transform:translateY(-50%)}.side-navigation:disabled{opacity:.07;cursor:default}.cover-view,.spectrogram-view,.waveform-view{position:relative;z-index:2}
+.lyrics-toggle{position:absolute;z-index:15;left:0;bottom:70px;width:48px;height:52px;padding:0;display:grid;place-items:center;border:0;background:transparent;color:#b3b6af;opacity:.3}.lyrics-toggle svg{width:28px;height:28px;fill:none;stroke:currentColor;stroke-width:1.3;stroke-linecap:round;stroke-linejoin:round}.lyrics-toggle:hover:not(:disabled),.lyrics-toggle:focus-visible,.lyrics-toggle.active{transform:none;opacity:.75;color:#e1e3dd}.lyrics-toggle.active{color:var(--signal)}
+.lyrics-overlay{position:absolute;z-index:10;left:0;right:0;bottom:60px;max-height:48svh;box-sizing:border-box;padding:clamp(24px,5vw,72px) clamp(52px,9vw,150px) clamp(20px,4vw,54px);overflow-y:auto;overscroll-behavior:contain;background:linear-gradient(180deg,transparent 0,#0c0d0ce8 22%,#0c0d0c 100%);pointer-events:auto}.plain-lyrics{max-width:1100px;margin:0 auto;white-space:pre-wrap;color:#f0f1ed;font:italic clamp(28px,4.4vw,68px)/1.28 Georgia,'Times New Roman',serif;letter-spacing:-.025em}.timed-lyrics{max-width:1160px;margin:0 auto}.timed-lyrics p{margin:.2em 0;color:#777c73;font:italic clamp(26px,4.2vw,64px)/1.15 Georgia,'Times New Roman',serif;letter-spacing:-.035em;transition:color .2s,opacity .2s;opacity:.45}.timed-lyrics p.current{color:#f4f5f1;opacity:1}
 .view-switcher { position: absolute; z-index: 19; left: 50%; bottom: 70px; transform: translateX(-50%); display: flex; gap: 4px; padding: 0; border: 0; background: #101110cc; }
 .view-switcher button { min-height: 40px; padding: 8px 13px; background: transparent; color: var(--muted); border: 0; text-transform: uppercase; letter-spacing: .1em; font-size: 9px; }
 .view-switcher button.active { background: transparent; color: var(--signal); }
@@ -181,6 +183,10 @@ audio { display: none; }
   .side-navigation.album { top: 26%; }
   .side-navigation.visualization { top: 48%; }
   .side-navigation.track { top: 70%; }
+  .lyrics-toggle { width: 44px; height: 48px; bottom: 72px; }
+  .lyrics-overlay { max-height: 52svh; padding: 42px 34px 26px 48px; }
+  .plain-lyrics { font-size: clamp(25px,8.4vw,42px); }
+  .timed-lyrics p { font-size: clamp(25px,8vw,40px); }
   .view-switcher { bottom: 62px; }
   .spectrogram-view { width: 100vw; height: calc(100svh - 184px); grid-template-rows: minmax(0,1fr) 110px; }
   .descriptor-strip { grid-template-columns: repeat(5,minmax(62px,1fr)); overflow-x: auto; }

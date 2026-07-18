@@ -2,7 +2,7 @@
   import { page } from '$app/state';
   import { onMount } from 'svelte';
   import { SvelteMap } from 'svelte/reactivity';
-  import type { CatalogItem, CatalogSegment } from '@zztt/aby-domain';
+  import type { CatalogItem, CatalogSegment, TimedTextDocument } from '@zztt/aby-domain';
   import type { PageData } from './$types';
   import { displayTrackTitle, formatDuration, formatTechnicalFormat } from '$lib/presentation';
   import {
@@ -37,6 +37,9 @@
   let editingItem = $state<CatalogItem | null>(null);
   let editingAlbumItems = $state<CatalogItem[] | null>(null);
   let coverFlipped = $state(false);
+  let lyricsOpen = $state(false);
+  let lyricsDocument = $state<TimedTextDocument | null>(null);
+  let lyricsLoading = $state(false);
   let itemGesture = { id: '', x: 0, y: 0 };
   let suppressClickId = '';
   let gestureStart = { x: 0, y: 0 };
@@ -153,6 +156,21 @@
   const selectedAlbumItems = $derived(selectedAlbumIndex >= 0 ? navigationAlbums[selectedAlbumIndex]?.items ?? [] : []);
   const selectedAssetId = $derived(selected?.asset.id ?? '');
   const selectedTrackIndex = $derived(selectedAssetId ? selectedAlbumItems.findIndex((item) => item.asset.id === selectedAssetId) : -1);
+  const activeLyricIndex = $derived.by(() => {
+    if (!lyricsDocument?.cues.length || lyricsDocument.syncLevel === 'none') return -1;
+    const adjustedTime = ($currentPlaybackTimeMs - lyricsDocument.offsetMs) / lyricsDocument.timeScale;
+    let active = -1;
+    for (const [index, cue] of lyricsDocument.cues.entries()) {
+      if (cue.startMs !== null && cue.startMs <= adjustedTime) active = index;
+      else if (cue.startMs !== null && cue.startMs > adjustedTime) break;
+    }
+    return active;
+  });
+  const visibleLyricCues = $derived.by(() => {
+    if (!lyricsDocument || lyricsDocument.syncLevel === 'none') return [];
+    const start = Math.max(0, activeLyricIndex < 0 ? 0 : activeLyricIndex);
+    return lyricsDocument.cues.slice(start, start + 3);
+  });
 
   function nestedGroups(source: CatalogItem[], parentTitle: (item: CatalogItem) => string, childTitle: (item: CatalogItem) => string) {
     const parents = new SvelteMap<string, { id: string; title: string; children: SvelteMap<string, { id: string; title: string; items: CatalogItem[] }> }>();
@@ -281,6 +299,8 @@
     if (next && next.asset.id !== selected?.asset.id) {
       selected = next;
       coverFlipped = false;
+      lyricsOpen = false;
+      lyricsDocument = null;
     }
   }));
 
@@ -323,6 +343,8 @@
   async function playItem(item: CatalogItem) {
     selected = item;
     coverFlipped = false;
+    lyricsOpen = false;
+    lyricsDocument = null;
     drawerOpen = false;
     message = '';
     try {
@@ -436,6 +458,23 @@
       if (!response.ok) throw new Error(body.error?.message ?? 'Metadata refresh failed');
       replaceItem(body.item); openActionsId = null; message = '';
     } catch (error) { message = error instanceof Error ? error.message : 'Metadata refresh failed'; }
+  }
+
+  async function toggleLyrics() {
+    if (lyricsOpen) { lyricsOpen = false; return; }
+    if (!selected?.hasLyrics) return;
+    lyricsLoading = true;
+    try {
+      const response = await fetch(`/api/assets/${selected.asset.id}/lyrics`);
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error?.message ?? 'Lyrics could not be loaded');
+      lyricsDocument = body.lyrics;
+      lyricsOpen = Boolean(lyricsDocument);
+    } catch (error) {
+      message = error instanceof Error ? error.message : 'Lyrics could not be loaded';
+    } finally {
+      lyricsLoading = false;
+    }
   }
 
   let isPressing = $state(false);
@@ -588,6 +627,24 @@
       <button class="side-navigation track next" onclick={() => navigateTrack(1)} disabled={selectedTrackIndex < 0 || selectedTrackIndex >= selectedAlbumItems.length - 1} title="Next track" aria-label="Next track">
         <svg viewBox="0 0 32 32" aria-hidden="true"><path d="m12 7 9 9-9 9" /></svg>
       </button>
+    {/if}
+    {#if selected?.hasLyrics}
+      <button class:active={lyricsOpen} class="lyrics-toggle" onclick={toggleLyrics} disabled={lyricsLoading} title="Toggle lyrics" aria-label="Toggle lyrics">
+        <svg viewBox="0 0 32 32" aria-hidden="true"><path d="M7 9h18M7 15h14M7 21h10" /><path d="M23 20c0 3-1.8 5-5 5 2.1-1.5 2.8-3 2.8-5H23Z" /></svg>
+      </button>
+    {/if}
+    {#if lyricsOpen && lyricsDocument}
+      <section class="lyrics-overlay" aria-label="Lyrics" aria-live="polite">
+        {#if lyricsDocument.syncLevel === 'none'}
+          <div class="plain-lyrics">{lyricsDocument.plainText}</div>
+        {:else}
+          <div class="timed-lyrics">
+            {#each visibleLyricCues as cue, index (cue.id ?? cue.position)}
+              <p class:current={index === 0 && activeLyricIndex >= 0}>{cue.text}</p>
+            {/each}
+          </div>
+        {/if}
+      </section>
     {/if}
     {#if $currentPlayback}
       <button 
