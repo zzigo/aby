@@ -43,6 +43,15 @@ export const TechnicalMetadataSchema = z.object({
 });
 export type TechnicalMetadata = z.infer<typeof TechnicalMetadataSchema>;
 
+export const AlbumRoleSchema = z.object({
+  name: z.string().trim().min(1).max(500),
+  role: z.string().trim().min(1).max(200),
+  tracks: z.string().trim().max(200).optional(),
+  externalId: z.string().trim().max(200).optional(),
+  authority: z.string().trim().max(100).optional()
+});
+export type AlbumRole = z.infer<typeof AlbumRoleSchema>;
+
 export const CandidateMetadataSchema = z.object({
   title: z.string().min(1),
   recordingTitle: z.string().min(1),
@@ -51,6 +60,11 @@ export const CandidateMetadataSchema = z.object({
   recordingFolder: z.string().min(1).optional(),
   creator: z.string().optional(),
   albumArtist: z.string().optional(),
+  albumDurationMs: z.number().int().nonnegative().optional(),
+  albumTags: z.array(z.string().trim().min(1).max(100)).max(100).optional(),
+  genres: z.array(z.string().trim().min(1).max(100)).max(100).optional(),
+  styles: z.array(z.string().trim().min(1).max(100)).max(100).optional(),
+  roles: z.array(AlbumRoleSchema).max(250).optional(),
   date: z.string().optional(),
   releaseDate: z.string().optional(),
   label: z.string().optional(),
@@ -125,7 +139,8 @@ export const CandidateMetadataSchema = z.object({
       duration: z.string().optional(),
       type: z.string().optional()
     })).optional(),
-    dataQuality: z.string().optional()
+    dataQuality: z.string().optional(),
+    durationMs: z.number().int().nonnegative().optional()
   }).optional(),
   discogsRefreshedAt: z.string().datetime().optional(),
   metadataSources: z.array(z.object({
@@ -141,6 +156,9 @@ export const CandidateMetadataSchema = z.object({
     format: z.string(),
     codec: z.string(),
     quality: z.number().optional(),
+    checksumSha256: z.string().regex(/^[a-f0-9]{64}$/).optional(),
+    sourceChecksumSha256: z.string().regex(/^[a-f0-9]{64}$/).optional(),
+    metadataVersion: z.string().optional(),
     createdAt: z.string().datetime()
   })).optional(),
   tracks: z.array(z.object({
@@ -294,7 +312,12 @@ export const AlbumEditSchema = z.object({
   creator: z.string().trim().max(500).nullable().optional(),
   releaseDate: z.string().trim().max(500).nullable().optional(),
   label: z.string().trim().max(500).nullable().optional(),
-  catalogNumber: z.string().trim().max(500).nullable().optional()
+  catalogNumber: z.string().trim().max(500).nullable().optional(),
+  albumDurationMs: z.number().int().nonnegative().nullable().optional(),
+  albumTags: z.array(z.string().trim().min(1).max(100)).max(100).optional(),
+  genres: z.array(z.string().trim().min(1).max(100)).max(100).optional(),
+  styles: z.array(z.string().trim().min(1).max(100)).max(100).optional(),
+  roles: z.array(AlbumRoleSchema).max(250).optional()
 });
 export type AlbumEdit = z.infer<typeof AlbumEditSchema>;
 

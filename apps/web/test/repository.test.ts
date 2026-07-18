@@ -115,7 +115,9 @@ describe('preview-before-write repository flow', () => {
 
     const updated = await repository.applyAlbumMetadata('owner-a', albumId, {
       title: 'Sind', albumArtist: 'Axel Dörner', releaseDate: '2007',
-      label: 'absinthRecords', catalogNumber: 'absinthRecords 010'
+      label: 'absinthRecords', catalogNumber: 'absinthRecords 010', albumDurationMs: 252_000,
+      albumTags: ['Free Improvisation'], genres: ['Jazz'], styles: ['Free Improvisation'],
+      roles: [{ name: 'Axel Dörner', role: 'Trumpet' }]
     }, {
       imageCandidates: [{
         authority: 'discogs', url: 'https://i.discogs.com/sind.jpeg', kind: 'cover',
@@ -131,6 +133,9 @@ describe('preview-before-write repository flow', () => {
       expect(item.creator).toBe('Artist');
       expect(item.label).toBe('absinthRecords');
       expect(item.coverUrl).toBe('https://i.discogs.com/sind.jpeg');
+      expect(item.asset.canonicalMetadata.albumDurationMs).toBe(252_000);
+      expect(item.asset.canonicalMetadata.albumTags).toEqual(['Free Improvisation']);
+      expect(item.asset.canonicalMetadata.roles).toEqual([{ name: 'Axel Dörner', role: 'Trumpet' }]);
     }
   });
 

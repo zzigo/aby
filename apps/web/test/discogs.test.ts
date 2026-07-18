@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { searchDiscogsRelease } from '../src/lib/server/discogs';
+import { parseDiscogsDuration, searchDiscogsRelease } from '../src/lib/server/discogs';
 
 describe('Discogs album metadata', () => {
   test('finds Axel Dörner — Sind and returns release-level artwork', async () => {
@@ -47,8 +47,15 @@ describe('Discogs album metadata', () => {
       companies: [{ name: 'Example Studio', role: 'Recorded At', externalId: '44' }],
       credits: [{ name: 'Axel Dörner', role: 'Trumpet', tracks: '1-4', externalId: '55' }],
       formats: [{ name: 'CD', quantity: '1', descriptions: ['Album'] }],
-      tracklist: [{ position: '1', title: 'Sind', duration: '4:12', type: 'track' }]
+      tracklist: [{ position: '1', title: 'Sind', duration: '4:12', type: 'track' }],
+      durationMs: 252_000
     });
+  });
+
+  test('normalizes Discogs album clocks without confusing 79 minutes with 79 hours', () => {
+    expect(parseDiscogsDuration('79:14')).toBe(4_754_000);
+    expect(parseDiscogsDuration('1:19:14')).toBe(4_754_000);
+    expect(parseDiscogsDuration('4:72')).toBeUndefined();
   });
 
   test('falls back to release title when the embedded artist is damaged or wrong', async () => {

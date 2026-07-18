@@ -42,12 +42,21 @@ export const PUT: RequestHandler = (event) => api('album.metadata.discogs.apply'
     sourceId: candidate.id, provenance: { canonicalUrl: candidate.canonicalUrl }
   }, ...prior] : prior;
   const fetchedAt = new Date().toISOString();
+  const albumTags = [...new Set([
+    ...(first.asset.canonicalMetadata.albumTags ?? []),
+    ...(candidate.styles ?? [])
+  ])];
   const updated = await repository.applyAlbumMetadata(ownerId, event.params.id, {
     title: candidate.title,
     albumArtist: candidate.creator,
     releaseDate: candidate.releaseDate || candidate.year || null,
     label: candidate.label || null,
-    catalogNumber: candidate.catalogNumber || null
+    catalogNumber: candidate.catalogNumber || null,
+    albumDurationMs: candidate.durationMs ?? null,
+    albumTags,
+    genres: candidate.genres ?? [],
+    styles: candidate.styles ?? [],
+    roles: (candidate.credits ?? []).map((credit) => ({ ...credit, authority: 'discogs' }))
   }, {
     ...(imageCandidates.length ? { imageCandidates } : {}),
     discogs: candidate,

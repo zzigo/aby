@@ -52,6 +52,7 @@ export interface DiscogsReleaseCandidate {
   formats?: Array<{ name: string; quantity?: string; descriptions?: string[] }>;
   tracklist?: Array<{ position?: string; title: string; duration?: string; type?: string }>;
   dataQuality?: string;
+  durationMs?: number;
 }
 
 interface DiscogsOptions {
@@ -64,6 +65,16 @@ const normalize = (value: string) => value
   .toLowerCase()
   .replace(/[^a-z0-9]+/g, ' ')
   .trim();
+
+export function parseDiscogsDuration(value: string): number | undefined {
+  const parts = value.trim().split(':').map(Number);
+  if ((parts.length !== 2 && parts.length !== 3) || parts.some((part) => !Number.isInteger(part) || part < 0)) return undefined;
+  const seconds = parts.at(-1)!;
+  const minutes = parts.at(-2)!;
+  if (seconds >= 60 || (parts.length === 3 && minutes >= 60)) return undefined;
+  const hours = parts.length === 3 ? parts[0]! : 0;
+  return ((hours * 60 + minutes) * 60 + seconds) * 1000;
+}
 
 function headers() {
   const config = readConfig();
@@ -118,6 +129,11 @@ function releaseCandidate(
     ...(entry.duration ? { duration: entry.duration } : {}),
     ...(entry.type_ ? { type: entry.type_ } : {})
   }] : []);
+  const timedTracks = tracklist.filter((track) => !track.type || track.type === 'track');
+  const trackDurations = timedTracks.map((track) => track.duration ? parseDiscogsDuration(track.duration) : undefined);
+  const durationMs = timedTracks.length && trackDurations.every((duration): duration is number => duration !== undefined)
+    ? trackDurations.reduce((total, duration) => total + duration, 0)
+    : undefined;
   const label = release.labels?.[0];
   const cover = release.images?.find((image) => image.type === 'primary') ?? release.images?.[0];
   const releasePath = release.uri;
@@ -138,6 +154,7 @@ function releaseCandidate(
     ...(release.styles?.length ? { styles: release.styles } : {}),
     ...(formats.length ? { formats } : {}),
     ...(tracklist.length ? { tracklist } : {}),
+    ...(durationMs !== undefined ? { durationMs } : {}),
     ...(release.data_quality ? { dataQuality: release.data_quality } : {}),
     canonicalUrl: releasePath
       ? /^https?:\/\//i.test(releasePath) ? releasePath : new URL(releasePath, 'https://www.discogs.com').toString()

@@ -1,6 +1,7 @@
 <script lang="ts">
   import { untrack } from 'svelte';
-  import type { CatalogItem } from '@zztt/aby-domain';
+  import type { AlbumRole, CatalogItem } from '@zztt/aby-domain';
+  import { formatDuration } from '$lib/presentation';
   import MetadataQueryLab from './MetadataQueryLab.svelte';
 
   interface DiscogsCandidate {
@@ -22,6 +23,7 @@
     formats?: Array<{ name: string; quantity?: string; descriptions?: string[] }>;
     tracklist?: Array<{ position?: string; title: string; duration?: string }>;
     dataQuality?: string;
+    durationMs?: number;
   }
 
   let { items: initialItems, onclose, onsaved }: {
@@ -39,11 +41,18 @@
   const embeddedAlbum = $derived(sourceTag('album'));
   const embeddedArtist = $derived(sourceTag('album_artist', 'albumartist', 'artist'));
   const embeddedDate = $derived(sourceTag('date', 'year'));
+  const localDurationMs = $derived(albumItems.reduce((total, item) => total + item.asset.technicalMetadata.durationMs, 0));
   let title = $state(untrack(() => initialItems[0]?.albumTitle ?? ''));
   let albumArtist = $state(untrack(() => initialItems[0]?.albumArtist ?? initialItems[0]?.creator ?? ''));
   let releaseDate = $state(untrack(() => initialItems[0]?.releaseDate ?? ''));
   let label = $state(untrack(() => initialItems[0]?.label ?? ''));
   let catalogNumber = $state(untrack(() => initialItems[0]?.asset.canonicalMetadata.catalogNumber ?? ''));
+  let albumDuration = $state(untrack(() => initialItems[0]?.asset.canonicalMetadata.albumDurationMs !== undefined
+    ? formatDuration(initialItems[0].asset.canonicalMetadata.albumDurationMs).replace(/\.00$/, '') : ''));
+  let albumTags = $state(untrack(() => initialItems[0]?.asset.canonicalMetadata.albumTags?.join(', ') ?? ''));
+  let genres = $state<string[]>(untrack(() => [...(initialItems[0]?.asset.canonicalMetadata.genres ?? [])]));
+  let styles = $state<string[]>(untrack(() => [...(initialItems[0]?.asset.canonicalMetadata.styles ?? [])]));
+  let roles = $state<AlbumRole[]>(untrack(() => structuredClone(initialItems[0]?.asset.canonicalMetadata.roles ?? [])));
   let candidate = $state<DiscogsCandidate | null>(untrack(() => {
     const value = initialItems[0]?.asset.canonicalMetadata.discogs;
     return value && typeof value === 'object' ? value as unknown as DiscogsCandidate : null;
@@ -66,6 +75,58 @@
     onsaved(updated);
   }
 
+  function parseDuration(value: string): number | null {
+    const clean = value.trim();
+    if (!clean) return null;
+    const parts = clean.split(':').map(Number);
+    if ((parts.length !== 2 && parts.length !== 3) || parts.some((part) => !Number.isFinite(part) || part < 0)) {
+      throw new Error('Use MM:SS or HH:MM:SS for album duration');
+    }
+    const seconds = parts.at(-1)!;
+    const minutes = parts.at(-2)!;
+    if (seconds >= 60 || (parts.length === 3 && minutes >= 60)) throw new Error('Album duration has an invalid clock value');
+    const hours = parts.length === 3 ? parts[0]! : 0;
+    return Math.round(((hours * 60 + minutes) * 60 + seconds) * 1000);
+  }
+
+  const csv = (value: string) => [...new Set(value.split(',').map((entry) => entry.trim()).filter(Boolean))];
+
+  function addAlbumTag(value: string) {
+    const current = csv(albumTags);
+    if (!current.some((tag) => tag.toLocaleLowerCase() === value.toLocaleLowerCase())) current.push(value);
+    albumTags = current.join(', ');
+  }
+
+  function removeAlbumTag(value: string) {
+    albumTags = csv(albumTags).filter((tag) => tag.toLocaleLowerCase() !== value.toLocaleLowerCase()).join(', ');
+  }
+
+  function addRole() {
+    roles = [...roles, { name: '', role: '', tracks: '' }];
+  }
+
+  function removeRole(index: number) {
+    roles = roles.filter((_, roleIndex) => roleIndex !== index);
+  }
+
+  function albumPayload() {
+    return {
+      title,
+      albumArtist: albumArtist || null,
+      releaseDate: releaseDate || null,
+      label: label || null,
+      catalogNumber: catalogNumber || null,
+      albumDurationMs: parseDuration(albumDuration),
+      albumTags: csv(albumTags),
+      genres,
+      styles,
+      roles: roles.filter((role) => role.name.trim() && role.role.trim()).map((role) => ({
+        ...role, name: role.name.trim(), role: role.role.trim(),
+        ...(role.tracks?.trim() ? { tracks: role.tracks.trim() } : { tracks: undefined })
+      }))
+    };
+  }
+
   async function save() {
     if (!first) return;
     busy = true;
@@ -74,18 +135,31 @@
       const body = await jsonRequest(`/api/albums/${first.albumId}`, {
         method: 'PATCH',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          title,
-          albumArtist: albumArtist || null,
-          releaseDate: releaseDate || null,
-          label: label || null,
-          catalogNumber: catalogNumber || null
-        })
+        body: JSON.stringify(albumPayload())
       });
       acceptItems(body.items);
       message = 'Saved';
     } catch (error) {
       message = error instanceof Error ? error.message : 'Save failed';
+    } finally {
+      busy = false;
+    }
+  }
+
+  async function writeId3() {
+    if (!first) return;
+    busy = true;
+    message = 'Saving album and writing ID3 copies…';
+    try {
+      const saved = await jsonRequest(`/api/albums/${first.albumId}`, {
+        method: 'PATCH', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(albumPayload())
+      });
+      acceptItems(saved.items);
+      const body = await jsonRequest(`/api/albums/${first.albumId}/id3`, { method: 'POST' });
+      message = `${body.written} ID3 ${body.written === 1 ? 'copy' : 'copies'} ready · audio streams unchanged`;
+    } catch (error) {
+      message = error instanceof Error ? error.message : 'ID3 write failed';
     } finally {
       busy = false;
     }
@@ -126,6 +200,12 @@
       label = applied.label || '';
       catalogNumber = applied.catalogNumber || '';
       acceptItems(body.items);
+      const canonical = (body.items as CatalogItem[])[0]?.asset.canonicalMetadata;
+      albumDuration = canonical?.albumDurationMs !== undefined ? formatDuration(canonical.albumDurationMs).replace(/\.00$/, '') : '';
+      albumTags = canonical?.albumTags?.join(', ') ?? '';
+      genres = [...(canonical?.genres ?? [])];
+      styles = [...(canonical?.styles ?? [])];
+      roles = structuredClone(canonical?.roles ?? []);
       message = `Applied to ${body.items.length} track${body.items.length === 1 ? '' : 's'}`;
     } catch (error) {
       message = error instanceof Error ? error.message : 'Discogs apply failed';
@@ -178,7 +258,10 @@
           <label>Release<input bind:value={releaseDate} /></label>
           <label>Label<input bind:value={label} /></label>
           <label>Catalog no.<input bind:value={catalogNumber} /></label>
+          <label>Declared duration<input bind:value={albumDuration} placeholder="MM:SS or HH:MM:SS" /></label>
+          <label class="wide-field">Album tags<input bind:value={albumTags} placeholder="opera, contemporary" /></label>
         </div>
+        <div class="duration-compare"><span>DECLARED {albumDuration || '—'}</span><span>ASSETS {formatDuration(localDurationMs)}</span></div>
         <div class="dependencies"><span>WORK {first.asset.workId}</span><span>ALBUM {first.albumId}</span><span>{albumItems.length} TRACKS INHERIT RELEASE FIELDS</span></div>
       </section>
 
@@ -199,6 +282,20 @@
         </ol>
       </section>
 
+      <section class="roles-section">
+        <div class="section-title"><h2>Roles</h2><button onclick={addRole}>+ role</button></div>
+        <div class="roles">
+          {#each roles as credit, index (`${credit.externalId ?? 'manual'}:${index}`)}
+            <div class="role-row">
+              <input bind:value={credit.name} aria-label={`Role ${index + 1} person`} placeholder="person / entity" />
+              <input bind:value={credit.role} aria-label={`Role ${index + 1} function`} placeholder="role" />
+              <input bind:value={credit.tracks} aria-label={`Role ${index + 1} scope`} placeholder="all or 1-4" />
+              <button onclick={() => removeRole(index)} aria-label={`Remove ${credit.name || 'role'}`}>−</button>
+            </div>
+          {/each}
+        </div>
+      </section>
+
       <section class="embedded">
         <div class="section-title"><h2>Embedded source tags</h2><button onclick={useEmbedded} disabled={busy || (!embeddedAlbum && !embeddedArtist && !embeddedDate)}>Use fields</button></div>
         <dl>
@@ -207,6 +304,22 @@
           <dt>Date</dt><dd>{embeddedDate || '—'}</dd>
         </dl>
         {#if embeddedArtist.includes('�')}<p class="warning">The source artist contains a damaged character. Review it before applying.</p>{/if}
+      </section>
+
+      <section class="descriptors">
+        <h2>Descriptors → Aby tags</h2>
+        <div class="tag-list canonical-tags">
+          {#each csv(albumTags) as tag (tag)}<button onclick={() => removeAlbumTag(tag)} title="Remove from album tags">{tag} −</button>{/each}
+        </div>
+        <h3>Styles</h3>
+        <div class="tag-list">
+          {#each styles as style (style)}<button onclick={() => addAlbumTag(style)} class:linked={csv(albumTags).some((tag) => tag.toLocaleLowerCase() === style.toLocaleLowerCase())}>+ {style}</button>{/each}
+        </div>
+        <h3>Legacy genres</h3>
+        <div class="tag-list legacy">
+          {#each genres as genre (genre)}<button onclick={() => addAlbumTag(genre)} class:linked={csv(albumTags).some((tag) => tag.toLocaleLowerCase() === genre.toLocaleLowerCase())}>+ {genre}</button>{/each}
+        </div>
+        <p>Styles seed album tags. Genres remain imported descriptors until explicitly bridged.</p>
       </section>
 
       <section class="discogs">
@@ -224,6 +337,7 @@
             <dt>Label</dt><dd>{candidate.label ?? '—'}</dd>
             <dt>Catalog</dt><dd>{candidate.catalogNumber ?? '—'}</dd>
             <dt>Country</dt><dd>{candidate.country ?? '—'}</dd>
+            <dt>Duration</dt><dd>{candidate.durationMs !== undefined ? formatDuration(candidate.durationMs) : '—'}</dd>
             <dt>Genres</dt><dd>{[...(candidate.genres ?? []), ...(candidate.styles ?? [])].join(' · ') || '—'}</dd>
             <dt>Companies</dt><dd>{candidate.companies?.map((company) => `${company.name}${company.role ? ` (${company.role})` : ''}`).join(' · ') || '—'}</dd>
             <dt>Credits</dt><dd>{candidate.credits?.map((credit) => `${credit.role}: ${credit.name}${credit.tracks ? ` [${credit.tracks}]` : ''}`).join(' · ') || '—'}</dd>
@@ -244,7 +358,7 @@
 
     <footer>
       <div><span>{message}</span><small>This application uses Discogs’ API but is not affiliated with, sponsored or endorsed by Discogs. “Discogs” is a trademark of Zink Media, LLC.</small></div>
-      <button class="save" onclick={save} disabled={busy}>Save album</button>
+      <div class="footer-actions"><button onclick={writeId3} disabled={busy}>Write ID3 copies</button><button class="save" onclick={save} disabled={busy}>Save album</button></div>
     </footer>
   </div>
 {/if}
@@ -252,5 +366,6 @@
 <style>
   .album-editor{position:fixed;inset:0;z-index:1100;background:#0b0c0b;color:#f2f3ef;display:grid;grid-template-rows:auto 1fr auto;font-family:ui-monospace,SFMono-Regular,monospace}
   header,footer{display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid #30332e}footer{border-top:1px solid #30332e;border-bottom:0;gap:20px}footer>div{display:grid;gap:5px;max-width:760px}h1,h2{margin:0}h1{font-size:clamp(18px,3vw,32px);font-weight:500}h2{font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:#9ba394;margin-bottom:14px}small{color:#7f867b}.close{font-size:36px;border:0;background:none;color:#fff}.album-editor>main{width:100%;min-height:0;margin:0;padding:0;overflow:auto;display:grid;grid-template-columns:minmax(0,2fr) minmax(260px,1fr)}section{padding:20px;border-right:1px solid #30332e;border-bottom:1px solid #30332e}.canonical,.tracks,.embedded{grid-column:1}.cover-section,.discogs{grid-column:2}.discogs,.embedded{background:#151a14}.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.grid label{font-size:10px;color:#9ba394}.grid input{display:block;width:100%;box-sizing:border-box;margin-top:5px;background:#111310;color:#fff;border:1px solid #30332e;padding:11px;font:inherit}.dependencies{display:flex;flex-wrap:wrap;gap:8px;margin-top:18px}.dependencies span{font-size:9px;color:#737a70;border:1px solid #30332e;padding:6px}.drop{min-height:260px;display:grid;place-items:center;border:1px dashed #596052;cursor:pointer;overflow:hidden}.drop img{width:100%;height:100%;max-height:420px;object-fit:contain}.drop input{display:none}.section-title{display:flex;justify-content:space-between;align-items:start;gap:12px}.section-title button,footer button,.discogs .apply{border:1px solid #4a5047;background:#111310;color:#fff;padding:9px 13px;font:inherit;font-size:10px}.tracks ol{list-style:none;padding:0;margin:0}.tracks li{display:grid;grid-template-columns:44px 1fr auto;gap:10px;padding:10px 0;border-bottom:1px solid #252823;font-size:11px}.tracks li>span,.tracks li>small{color:#7f867b}.tracks li>strong{font-weight:500}.embedded dl,.discogs dl{display:grid;grid-template-columns:90px 1fr;gap:8px;font-size:11px}.embedded dt,.discogs dt{color:#7f867b}.embedded dd,.discogs dd{margin:0;overflow-wrap:anywhere}.embedded .conflict,.warning{color:#ff9b7a}.discogs-query{display:grid;grid-template-columns:1fr 1.4fr 64px;gap:6px;margin-bottom:14px}.discogs-query input{min-width:0;background:#0d0f0d;color:#fff;border:1px solid #353a32;padding:8px;font:9px ui-monospace,monospace}.discogs a{display:inline-block;margin-top:14px;color:#c8ff52;font-size:10px}.discogs p{font-size:11px;color:#7f867b}.discogs .apply{width:100%;margin-top:14px;background:#c8ff52;color:#10110f}.save{background:#c8ff52!important;color:#10110f!important}footer span{font-size:10px;color:#c8ff52}footer small{font-size:8px;line-height:1.35}
+  .wide-field{grid-column:1/-1}.duration-compare{display:flex;gap:8px;margin-top:10px}.duration-compare span{font-size:9px;color:#7f867b}.roles-section{grid-column:1}.roles{display:grid;gap:6px}.role-row{display:grid;grid-template-columns:1.4fr 1fr .7fr 34px;gap:6px}.role-row input{min-width:0;background:#0d0f0d;color:#fff;border:1px solid #353a32;padding:8px;font:9px ui-monospace,monospace}.role-row button,.descriptors button{border:1px solid #4a5047;background:#111310;color:#fff;font:9px ui-monospace,monospace}.descriptors{grid-column:2;background:#151a14}.descriptors h3{margin:16px 0 7px;color:#7f867b;font-size:9px;text-transform:uppercase}.tag-list{display:flex;flex-wrap:wrap;gap:5px}.tag-list button{padding:6px 8px}.tag-list button.linked{border-color:#c8ff52;color:#c8ff52}.tag-list.legacy button{color:#9b9f98}.descriptors p{font-size:9px;color:#7f867b;line-height:1.5}.canonical-tags button{background:#c8ff52;color:#10110f}.footer-actions{display:flex!important;gap:8px;max-width:none!important}
   @media(max-width:720px){.album-editor>main{display:block}.grid{grid-template-columns:1fr}.album-editor header,.album-editor footer{padding:12px}.album-editor section{padding:14px;border-right:0}.drop{min-height:190px}footer>div{max-width:65%}footer small{display:none}}
 </style>

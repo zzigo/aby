@@ -55,6 +55,7 @@
       item.workTitle, item.albumTitle, item.recordingTitle, item.creator,
       item.asset.canonicalMetadata.collectionCode, item.asset.objectKey,
       ...(item.asset.canonicalMetadata.tags ?? []),
+      ...(item.asset.canonicalMetadata.albumTags ?? []),
       ...Object.values(item.asset.technicalMetadata.tags)
     ].some((value) => value?.toLocaleLowerCase().includes(query)));
   });
@@ -105,8 +106,12 @@
   const tagGroups = $derived.by(() => {
     const groups = new SvelteMap<string, { id: string; title: string; items: CatalogItem[] }>();
     for (const item of visibleItems) {
-      const labels = item.asset.canonicalMetadata.tags?.length
-        ? item.asset.canonicalMetadata.tags
+      const canonicalTags = [...new Set([
+        ...(item.asset.canonicalMetadata.tags ?? []),
+        ...(item.asset.canonicalMetadata.albumTags ?? [])
+      ])];
+      const labels = canonicalTags.length
+        ? canonicalTags
         : [item.asset.canonicalMetadata.collectionCode || 'untagged'];
       for (const label of labels) {
         const id = label.toLocaleLowerCase();
