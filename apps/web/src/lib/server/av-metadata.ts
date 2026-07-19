@@ -209,6 +209,7 @@ export async function getTmdbMovieDetails(id: string) {
   const url = new URL(`https://api.themoviedb.org/3/movie/${encodeURIComponent(id)}`);
   url.searchParams.set('append_to_response', 'credits,external_ids');
   const response = await fetch(url, { headers: configureTmdbRequest(url, config), signal: timeout() });
+  if (response.status === 404) return null;
   if (!response.ok) throw new Error(`TMDB details responded ${response.status}`);
   const body = await response.json() as Record<string, any>;
   const director = body.credits?.crew?.find((person: Record<string, unknown>) => person.job === 'Director');
