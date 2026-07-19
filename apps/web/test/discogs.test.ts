@@ -1,7 +1,15 @@
 import { describe, expect, test } from 'bun:test';
-import { parseDiscogsDuration, searchDiscogsRelease } from '../src/lib/server/discogs';
+import { parseDiscogsDuration, parseDiscogsReleaseId, searchDiscogsRelease } from '../src/lib/server/discogs';
 
 describe('Discogs album metadata', () => {
+  test('accepts an exact release ID or Discogs release URL', () => {
+    expect(parseDiscogsReleaseId('2499992')).toBe('2499992');
+    expect(parseDiscogsReleaseId(' https://www.discogs.com/release/2499992-Leonard-Bernstein-New-York-Philharmonic-The-Symphony-Edition ')).toBe('2499992');
+    expect(parseDiscogsReleaseId('https://discogs.com/release/2499992/')).toBe('2499992');
+    expect(parseDiscogsReleaseId('https://example.com/release/2499992')).toBeUndefined();
+    expect(parseDiscogsReleaseId('Leonard Bernstein')).toBeUndefined();
+  });
+
   test('finds Axel Dörner — Sind and returns release-level artwork', async () => {
     const calls: URL[] = [];
     const fetcher: typeof fetch = (async (input) => {

@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { api, AbyError, jsonBody, ownerFor } from '$lib/server/errors';
-import { getDiscogsRelease, searchDiscogsRelease } from '$lib/server/discogs';
+import { getDiscogsRelease, parseDiscogsReleaseId, searchDiscogsRelease } from '$lib/server/discogs';
 import { getRepository } from '$lib/server/repository';
 import { mergeImageCandidates } from '$lib/server/image-candidates';
 import type { RequestHandler } from './$types';
@@ -12,10 +12,22 @@ export const POST: RequestHandler = (event) => api('album.metadata.discogs', asy
   const first = items[0];
   if (!first) throw new AbyError('album_not_found', 'Album not found', 404);
   const input = z.object({
+    release: z.string().trim().max(1000).optional(),
     creator: z.string().trim().max(500).optional(),
     albumTitle: z.string().trim().max(500).optional(),
     year: z.string().trim().max(50).optional()
   }).parse(await jsonBody(event));
+  if (input.release) {
+    const releaseId = parseDiscogsReleaseId(input.release);
+    if (!releaseId) {
+      throw new AbyError(
+        'discogs_release_invalid',
+        'Enter a numeric Discogs release ID or a discogs.com/release/… URL',
+        400
+      );
+    }
+    return { candidate: await getDiscogsRelease(releaseId), match: 'exact' };
+  }
   const creator = input.creator || first.albumArtist?.trim() || first.creator?.trim();
   if (!creator) throw new AbyError('album_creator_missing', 'Add the album creator before searching Discogs', 400);
   const candidate = await searchDiscogsRelease({
@@ -25,7 +37,7 @@ export const POST: RequestHandler = (event) => api('album.metadata.discogs', asy
   });
   if (!candidate) throw new AbyError('discogs_release_not_found', 'No Discogs release matched this album', 404);
 
-  return { candidate };
+  return { candidate, match: 'search' };
 });
 
 export const PUT: RequestHandler = (event) => api('album.metadata.discogs.apply', async () => {

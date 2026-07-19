@@ -78,6 +78,20 @@ export function parseDiscogsDuration(value: string): number | undefined {
   return ((hours * 60 + minutes) * 60 + seconds) * 1000;
 }
 
+export function parseDiscogsReleaseId(value: string): string | undefined {
+  const input = value.trim();
+  if (/^\d+$/.test(input)) return input;
+
+  try {
+    const url = new URL(input);
+    const hostname = url.hostname.toLowerCase();
+    if (hostname !== 'discogs.com' && !hostname.endsWith('.discogs.com')) return undefined;
+    return url.pathname.match(/^\/release\/(\d+)(?:[-/]|$)/i)?.[1];
+  } catch {
+    return undefined;
+  }
+}
+
 function headers() {
   const config = readConfig();
   const result: Record<string, string> = {
