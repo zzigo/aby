@@ -431,6 +431,129 @@ export const SegmentSchema = SegmentCreateSchema.safeExtend({
 });
 export type Segment = z.infer<typeof SegmentSchema>;
 
+export const AvTreeStrategySchema = z.enum(['author', 'decade', 'entity', 'saga', 'custom']);
+export type AvTreeStrategy = z.infer<typeof AvTreeStrategySchema>;
+
+export const AvCreditSchema = z.object({
+  name: z.string().trim().min(1).max(500),
+  role: z.string().trim().min(1).max(200),
+  character: z.string().trim().max(500).optional(),
+  externalIds: z.record(z.string(), z.string()).default({})
+});
+export type AvCredit = z.infer<typeof AvCreditSchema>;
+
+export const AvMetadataCandidateSchema = z.object({
+  authority: z.enum(['tmdb', 'wikidata', 'internet-archive']),
+  externalId: z.string().min(1),
+  title: z.string().min(1),
+  originalTitle: z.string().optional(),
+  year: z.number().int().min(1800).max(2200).optional(),
+  summary: z.string().optional(),
+  posterUrl: z.string().url().optional(),
+  canonicalUrl: z.string().url(),
+  externalIds: z.record(z.string(), z.string()).default({}),
+  metadata: z.record(z.string(), z.unknown()).default({})
+});
+export type AvMetadataCandidate = z.infer<typeof AvMetadataCandidateSchema>;
+
+export const AvCatalogCreateSchema = z.object({
+  sourceObjectKey: z.string().trim().min(1).max(4_000),
+  title: z.string().trim().min(1).max(500),
+  originalTitle: z.string().trim().max(500).optional(),
+  kind: z.enum(['film', 'episode', 'video', 'personal', 'archive']).default('film'),
+  year: z.number().int().min(1800).max(2200).optional(),
+  director: z.string().trim().max(500).optional(),
+  entity: z.string().trim().max(500).optional(),
+  saga: z.string().trim().max(500).optional(),
+  country: z.string().trim().max(200).optional(),
+  languages: z.array(z.string().trim().min(1).max(40)).max(40).default([]),
+  summary: z.string().trim().max(50_000).optional(),
+  posterUrl: z.string().url().optional(),
+  credits: z.array(AvCreditSchema).max(2_000).default([]),
+  externalIds: z.record(z.string(), z.string()).default({}),
+  metadataSources: z.array(z.object({
+    authority: z.string().min(1),
+    externalId: z.string().min(1),
+    canonicalUrl: z.string().url(),
+    fetchedAt: z.string().datetime()
+  })).max(50).default([]),
+  treeStrategy: AvTreeStrategySchema.default('author'),
+  treeValue: z.string().trim().min(1).max(500),
+  destinationObjectKey: z.string().trim().min(1).max(4_000)
+});
+export type AvCatalogCreate = z.infer<typeof AvCatalogCreateSchema>;
+
+export const AvCatalogItemSchema = AvCatalogCreateSchema.extend({
+  id: IdentifierSchema,
+  ownerId: z.string().min(1),
+  provider: z.literal('wasabi'),
+  bucket: z.string().min(1),
+  technicalMetadata: z.object({
+    sizeBytes: z.number().int().nonnegative(),
+    contentType: z.string().optional(),
+    etag: z.string().optional(),
+    durationMs: z.number().int().nonnegative().optional(),
+    videoCodec: z.string().optional(),
+    audioCodec: z.string().optional(),
+    width: z.number().int().positive().optional(),
+    height: z.number().int().positive().optional()
+  }),
+  state: z.enum(['staged', 'queued', 'copying', 'available', 'failed']),
+  createdAt: z.string().datetime(),
+  updatedAt: z.string().datetime()
+});
+export type AvCatalogItem = z.infer<typeof AvCatalogItemSchema>;
+
+export const StorageOperationSchema = z.object({
+  id: IdentifierSchema,
+  ownerId: z.string().min(1),
+  avItemId: IdentifierSchema,
+  operation: z.literal('copy'),
+  sourceObjectKey: z.string().min(1),
+  destinationObjectKey: z.string().min(1),
+  state: z.enum(['pending', 'running', 'succeeded', 'failed', 'cancelled']),
+  sizeBytes: z.number().int().nonnegative(),
+  transferredBytes: z.number().int().nonnegative(),
+  speedBytesPerSecond: z.number().nonnegative(),
+  etaSeconds: z.number().int().nonnegative().optional(),
+  beaconAt: z.string().datetime().optional(),
+  error: z.string().optional(),
+  createdAt: z.string().datetime(),
+  startedAt: z.string().datetime().optional(),
+  finishedAt: z.string().datetime().optional()
+});
+export type StorageOperation = z.infer<typeof StorageOperationSchema>;
+
+export const CaptureCreateSchema = z.object({
+  mediaKind: z.enum(['audio', 'video']),
+  assetId: IdentifierSchema.optional(),
+  avItemId: IdentifierSchema.optional(),
+  startTimeMs: z.number().int().nonnegative(),
+  endTimeMs: z.number().int().positive(),
+  label: z.string().trim().max(500).optional(),
+  annotations: z.array(z.object({
+    startTimeMs: z.number().int().nonnegative(),
+    endTimeMs: z.number().int().positive(),
+    label: z.string().trim().min(1).max(2_000),
+    rect: z.object({ x: z.number().min(0).max(1), y: z.number().min(0).max(1), width: z.number().positive().max(1), height: z.number().positive().max(1) }).optional()
+  })).max(500).default([])
+}).refine((value) => Boolean(value.assetId) !== Boolean(value.avItemId), {
+  message: 'A capture belongs to exactly one asset or AV item'
+}).refine((value) => value.endTimeMs > value.startTimeMs, {
+  message: 'Capture end must be after start'
+});
+export type CaptureCreate = z.infer<typeof CaptureCreateSchema>;
+
+export const CaptureSchema = CaptureCreateSchema.safeExtend({
+  id: IdentifierSchema,
+  ownerId: z.string().min(1),
+  shareToken: z.string().min(32),
+  shareUrl: z.string().min(1),
+  createdAt: z.string().datetime(),
+  updatedAt: z.string().datetime()
+});
+export type Capture = z.infer<typeof CaptureSchema>;
+
 export const JobContractSchema = z.object({
   id: IdentifierSchema,
   ownerId: z.string().min(1),

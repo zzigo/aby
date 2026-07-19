@@ -190,6 +190,18 @@ export async function playbackUrl(asset: Asset): Promise<{ url: string; expiresA
   return { url, expiresAt: new Date(Date.now() + expiresIn * 1000).toISOString() };
 }
 
+export async function sourceVideoPlaybackUrl(objectKey: string): Promise<{ url: string; expiresAt: string }> {
+  const config = readConfig();
+  const key = assertSourceObjectKey(objectKey, [config.sourceVideoPrefix]);
+  const expiresIn = config.ABY_PRESIGNED_URL_TTL_SECONDS;
+  const url = await getSignedUrl(wasabiClient(), new GetObjectCommand({
+    Bucket: config.WASABI_BUCKET!,
+    Key: toWasabiKey(key, config.wasabiRootPrefix),
+    ResponseContentDisposition: `inline; filename="${key.split('/').at(-1)?.replace(/["\r\n]/g, '_') ?? 'video'}"`
+  }), { expiresIn });
+  return { url, expiresAt: new Date(Date.now() + expiresIn * 1000).toISOString() };
+}
+
 export async function listWasabiSourceKeys(): Promise<string[]> {
   const config = readConfig();
   const bucket = config.WASABI_BUCKET!;
@@ -210,7 +222,7 @@ export async function listWasabiSourceKeys(): Promise<string[]> {
         for (const obj of response.Contents) {
           if (!obj.Key || obj.Key.endsWith('/')) continue;
           const ext = extname(obj.Key).toLowerCase();
-          if (!['.mp3', '.wav', '.m4a', '.flac', '.ogg', '.aac', '.mp4', '.mov'].includes(ext)) continue;
+          if (!['.mp3', '.wav', '.m4a', '.flac', '.ogg', '.aac', '.mp4', '.mov', '.mkv', '.m4v', '.avi', '.webm'].includes(ext)) continue;
           let logicalKey = obj.Key;
           if (root && logicalKey.startsWith(root)) logicalKey = logicalKey.substring(root.length);
           keys.push(logicalKey);
@@ -245,7 +257,7 @@ export async function listWasabiSiblingKeys(objectKey: string): Promise<string[]
       for (const obj of response.Contents) {
         if (!obj.Key || obj.Key.endsWith('/')) continue;
         const ext = extname(obj.Key).toLowerCase();
-        if (!['.mp3', '.wav', '.m4a', '.flac', '.ogg', '.aac', '.mp4', '.mov'].includes(ext)) continue;
+        if (!['.mp3', '.wav', '.m4a', '.flac', '.ogg', '.aac', '.mp4', '.mov', '.mkv', '.m4v', '.avi', '.webm'].includes(ext)) continue;
         let logicalKey = obj.Key;
         if (root && logicalKey.startsWith(root)) logicalKey = logicalKey.substring(root.length);
         if (dirname(logicalKey) !== dir) continue;

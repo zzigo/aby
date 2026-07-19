@@ -37,6 +37,9 @@ const EnvironmentSchema = z.object({
   DISCOGS_BASE_URL: z.string().url().default('https://api.discogs.com'),
   DISCOGS_CONSUMER_KEY: optionalText,
   DISCOGS_CONSUMER_SECRET: optionalText,
+  TMDB_READ_ACCESS_TOKEN: optionalText,
+  OPENSUBTITLES_API_KEY: optionalText,
+  OPENSUBTITLES_USERNAME: optionalText,
   ABY_EXTERNAL_METADATA_CONTACT: z.string().trim().default('https://aby.zztt.org'),
   ACOUSTID_CLIENT_API_KEY: z.string().trim().default('8Xt5HI6Y')
 });
@@ -79,6 +82,8 @@ export function readConfig(environment: NodeJS.ProcessEnv = process.env) {
     wasabiConfigured: Boolean(env.WASABI_ENDPOINT && env.WASABI_REGION && env.WASABI_BUCKET && env.WASABI_ACCESS_KEY_ID && env.WASABI_SECRET_ACCESS_KEY),
     logtoConfigured: Boolean(env.LOGTO_ISSUER_URL && env.LOGTO_CLIENT_ID && env.LOGTO_CLIENT_SECRET),
     discogsConfigured: Boolean(env.DISCOGS_CONSUMER_KEY && env.DISCOGS_CONSUMER_SECRET),
+    tmdbConfigured: Boolean(env.TMDB_READ_ACCESS_TOKEN),
+    openSubtitlesConfigured: Boolean(env.OPENSUBTITLES_API_KEY),
     qdrantConfigured: Boolean(env.QDRANT_URL)
   };
 }

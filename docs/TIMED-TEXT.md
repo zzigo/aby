@@ -16,6 +16,6 @@ The implemented music slice supports:
 
 LRCLIB is an external enrichment source, not canonical bibliographic authority. Its original LRC is retained alongside normalized cues. A manual save creates an accepted revision rather than destroying the provider version.
 
-## Deferred
+## Video
 
-Video subtitle providers, embedded subtitle extraction, OpenSubtitles, ASS/TTML import, drift controls, word-level alignment and forced-alignment workers are intentionally deferred until Aby's movie surface is implemented. The database discriminators already allow `lyrics`, `subtitles` and `transcript` without mixing provider or licensing rules.
+`VIEW` now exposes the playback contract for primary/secondary subtitle languages, subtitle size and provider discovery. Persisted subtitle attachment remains gated on a canonical AV asset and an explicit provider credential. OpenSubtitles/Podnapisi download, embedded stream extraction, ASS/TTML import, drift controls, word-level alignment and WhisperX forced alignment remain jobs to implement; the UI reports that state rather than fabricating a successful download.
