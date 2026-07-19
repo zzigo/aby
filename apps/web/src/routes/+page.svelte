@@ -1,8 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { SvelteURLSearchParams } from 'svelte/reactivity';
-  import type { Asset, IngestPreview, Segment } from '@zztt/aby-domain';
-  import { loadPlayback, loadSegmentPlayback } from '$lib/player';
+  import type { Asset, IngestPreview } from '@zztt/aby-domain';
   import { formatDuration, formatTechnicalFormat } from '$lib/presentation';
 
   type SharedPageData = { user: { id: string; name?: string | null; email?: string | null; picture?: string | null } | null };
@@ -21,7 +20,6 @@
 
   let preview = $state<IngestPreview | null>(null);
   let asset = $state<Asset | null>(null);
-  let segment = $state<Segment | null>(null);
   let workTitle = $state('');
   let recordingTitle = $state('');
   let albumTitle = $state('');
@@ -31,8 +29,6 @@
   let label = $state('');
   let catalogNumber = $state('');
   let trackEdits = $state<Array<{ objectKey: string; recordingTitle: string; trackNumber?: number }>>([]);
-  let startTimeMs = $state(100);
-  let endTimeMs = $state(700);
   let status = $state('Ready for one bounded inspection.');
   let busy = $state(false);
   let autoSeparation = $state(true);
@@ -196,7 +192,6 @@
       ...(track.trackNumber !== undefined ? { trackNumber: track.trackNumber } : {})
     }));
     asset = null;
-    segment = null;
   }
 
   async function surpriseMe() {
@@ -336,44 +331,6 @@
     }
   }
 
-  async function createSegment() {
-    if (!asset) return;
-    busy = true;
-    try {
-      const result = await request('/api/segments', {
-        assetId: asset.id,
-        startTimeMs,
-        endTimeMs,
-        label: 'Manual Phase 0 selection'
-      });
-      segment = result.segment;
-      status = 'Logical segment saved with human provenance; no clip was materialized.';
-    } catch (error) {
-      status = error instanceof Error ? error.message : 'Segment creation failed';
-    } finally {
-      busy = false;
-    }
-  }
-
-  async function play() {
-    if (!asset) return;
-    try {
-      await loadPlayback(asset.id, workTitle, recordingTitle);
-      status = 'Temporary playback URL issued.';
-    } catch (error) {
-      status = error instanceof Error ? error.message : 'Playback failed';
-    }
-  }
-
-  async function playSegment() {
-    if (!asset || !segment) return;
-    try {
-      await loadSegmentPlayback(asset.id, `${workTitle} · segment`, recordingTitle, segment.startTimeMs, segment.endTimeMs);
-      status = `Playing segment ${segment.startTimeMs}–${segment.endTimeMs} ms.`;
-    } catch (error) {
-      status = error instanceof Error ? error.message : 'Segment playback failed';
-    }
-  }
 </script>
 
 <svelte:head>
@@ -388,7 +345,7 @@
       <h1>Inspect the sound.<br />Commit the metadata.</h1>
     </div>
     <div class="intro-context">
-      <p>Aby keeps the original file untouched, separates machine candidates from canonical metadata, and treats segments as temporal references before they become files.</p>
+      <p>Aby keeps the original file untouched and separates machine candidates from canonical metadata before the explicit catalog commit.</p>
       {#if data.user}
         <div class="identity"><span>{data.user.name || data.user.email || 'Logto user'}</span><small>Shared Logto identity</small><form method="POST" action="?/signOut"><button class="secondary">Sign out</button></form></div>
       {:else}
@@ -483,22 +440,6 @@
       {/if}
     </article>
 
-    <article class:complete={Boolean(segment)}>
-      <header><span>03</span><h2>Segment</h2></header>
-      {#if asset}
-        <div class="time-fields">
-          <label>Start ms<input type="number" bind:value={startTimeMs} min="0" /></label>
-          <label>End ms<input type="number" bind:value={endTimeMs} min="1" /></label>
-        </div>
-        <div class="actions">
-          <button class="secondary" onclick={play}>Play asset</button>
-          {#if segment}<button class="secondary" onclick={playSegment}>Play segment</button>{/if}
-          <button class="primary" onclick={createSegment} disabled={busy}>Save interval</button>
-        </div>
-      {:else}
-        <p>Playback and interval tools unlock only after canonical confirmation.</p>
-      {/if}
-    </article>
   </section>
 
   <section class="inspection" aria-live="polite">
@@ -545,7 +486,6 @@
             </dd>
           </div>
         {/if}
-        {#if segment}<div><dt>Segment</dt><dd>{segment.startTimeMs}–{segment.endTimeMs} ms · logical interval</dd></div>{/if}
       </dl>
     {/if}
   </section>
