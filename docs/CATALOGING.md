@@ -42,6 +42,8 @@ Physical paths follow the domain spine where the evidence is known:
 aby/aud/<collection>/<entity>/<Work>/<Recording>/<Asset>
 ```
 
+`Collection` is the curatorial and physical-tree code (`20E`, `20L`, `ens`, and so on); it is not a commercial compilation or box set. An `Album` groups its tracks. An optional structured `Album Set` groups several albums or physical volumes under one parent release while retaining each member's own title and position. For example, `The Symphony Edition` is the set, while `CD25 · Symphony No. 2 - Symphony No. 3 "The Camp Meeting"` is an album inside it. Parent and member authority IDs remain separate.
+
 Recording folders remain human-readable and editable in preview. The first convention is `year-label`, preserving Unicode and replacing spaces with hyphens: `1990-Les-Disques-du-Crépuscule`. Catalog numbers remain structured release metadata and never enter the folder name. The recording's database title remains its human title; identity never depends only on path text because PostgreSQL stores stable UUIDs and external identifiers.
 
 The player catalog derives recent folders, favorites and its expandable tree only from committed object keys below `aby/aud/` and `aby/mov/`. Legacy `ref/` and `mov/` sources never appear in catalog navigation. They remain ingest/retirement inputs until their object-by-object adoption is reviewed.

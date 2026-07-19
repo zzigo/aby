@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { parseDiscogsDuration, parseDiscogsReleaseId, searchDiscogsRelease } from '../src/lib/server/discogs';
+import { discogsSetMemberReleaseId, parseDiscogsDuration, parseDiscogsReleaseId, searchDiscogsRelease } from '../src/lib/server/discogs';
 
 describe('Discogs album metadata', () => {
   test('accepts an exact release ID or Discogs release URL', () => {
@@ -8,6 +8,13 @@ describe('Discogs album metadata', () => {
     expect(parseDiscogsReleaseId('https://discogs.com/release/2499992/')).toBe('2499992');
     expect(parseDiscogsReleaseId('https://example.com/release/2499992')).toBeUndefined();
     expect(parseDiscogsReleaseId('Leonard Bernstein')).toBeUndefined();
+  });
+
+  test('links a box-set position to its child Discogs release', () => {
+    const notes = 'CD24 : [r2503051]\nCD25 : [r2503067]\nCD26 : [r2503149]';
+    expect(discogsSetMemberReleaseId(notes, 'CD25')).toBe('2503067');
+    expect(discogsSetMemberReleaseId(notes, 'cd26')).toBe('2503149');
+    expect(discogsSetMemberReleaseId(notes, 'CD60')).toBeUndefined();
   });
 
   test('finds Axel Dörner — Sind and returns release-level artwork', async () => {

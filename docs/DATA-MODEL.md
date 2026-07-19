@@ -4,6 +4,8 @@
 
 `Work -> Recording -> Asset -> Segment` is the primary ownership chain. `Track` is not a universal entity.
 
+For audio release navigation, an optional `Album` groups recordings and an optional structured `Album Set` groups albums or physical volumes. Set identity is metadata (`title`, position, total discs and parent/member external IDs) and does not replace the curatorial `collectionCode` used by the physical tree.
+
 - **Work:** intellectual or artistic expression.
 - **Recording:** a concrete fixation of a performance, session or event.
 - **Asset:** one binary representation, including its immutable origin and checksum.

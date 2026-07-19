@@ -67,6 +67,19 @@ export const AlbumRoleSchema = z.object({
 });
 export type AlbumRole = z.infer<typeof AlbumRoleSchema>;
 
+export const AlbumSetSchema = z.object({
+  title: z.string().trim().min(1).max(500),
+  position: z.string().trim().min(1).max(100),
+  discNumber: z.number().int().positive().optional(),
+  totalDiscs: z.number().int().positive().optional(),
+  authority: z.string().trim().min(1).max(100).optional(),
+  externalId: z.string().trim().min(1).max(500).optional(),
+  canonicalUrl: z.string().url().optional(),
+  memberExternalId: z.string().trim().min(1).max(500).optional(),
+  memberCanonicalUrl: z.string().url().optional()
+});
+export type AlbumSet = z.infer<typeof AlbumSetSchema>;
+
 export const CandidateMetadataSchema = z.object({
   title: z.string().min(1),
   recordingTitle: z.string().min(1),
@@ -82,6 +95,7 @@ export const CandidateMetadataSchema = z.object({
   roles: z.array(AlbumRoleSchema).max(250).optional(),
   notes: z.string().trim().max(20_000).optional(),
   albumNotes: z.string().trim().max(20_000).optional(),
+  albumSet: AlbumSetSchema.optional(),
   waveform: z.object({
     artifactObjectKey: z.string().min(1),
     sourceChecksumSha256: z.string().regex(/^[a-f0-9]{64}$/),
@@ -169,7 +183,8 @@ export const CandidateMetadataSchema = z.object({
       position: z.string().optional(),
       title: z.string().min(1),
       duration: z.string().optional(),
-      type: z.string().optional()
+      type: z.string().optional(),
+      externalId: z.string().optional()
     })).optional(),
     dataQuality: z.string().optional(),
     notes: z.string().optional(),
@@ -411,6 +426,7 @@ export const AlbumEditSchema = z.object({
   styles: z.array(z.string().trim().min(1).max(100)).max(100).optional(),
   roles: z.array(AlbumRoleSchema).max(250).optional(),
   notes: z.string().trim().max(20_000).nullable().optional(),
+  albumSet: AlbumSetSchema.nullable().optional(),
   collectionCode: z.string().trim().regex(/^[A-Za-z0-9]{1,8}$/).optional(),
   tracks: z.array(z.object({
     assetId: IdentifierSchema,

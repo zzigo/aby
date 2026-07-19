@@ -141,7 +141,11 @@ describe('preview-before-write repository flow', () => {
       title: 'Sind', albumArtist: 'Axel Dörner', releaseDate: '2007',
       label: 'absinthRecords', catalogNumber: 'absinthRecords 010', albumDurationMs: 252_000,
       albumTags: ['Free Improvisation'], genres: ['Jazz'], styles: ['Free Improvisation'],
-      roles: [{ name: 'Axel Dörner', role: 'Trumpet' }], notes: 'Release notes'
+      roles: [{ name: 'Axel Dörner', role: 'Trumpet' }], notes: 'Release notes',
+      albumSet: {
+        title: 'The Complete Edition', position: 'CD2', discNumber: 2, totalDiscs: 10,
+        authority: 'discogs', externalId: '100', memberExternalId: '102'
+      }
     }, {
       imageCandidates: [{
         authority: 'discogs', url: 'https://i.discogs.com/sind.jpeg', kind: 'cover',
@@ -161,6 +165,10 @@ describe('preview-before-write repository flow', () => {
       expect(item.asset.canonicalMetadata.albumTags).toEqual(['Free Improvisation']);
       expect(item.asset.canonicalMetadata.roles).toEqual([{ name: 'Axel Dörner', role: 'Trumpet' }]);
       expect(item.asset.canonicalMetadata.albumNotes).toBe('Release notes');
+      expect(item.asset.canonicalMetadata.albumSet).toMatchObject({
+        title: 'The Complete Edition', position: 'CD2', discNumber: 2, totalDiscs: 10,
+        externalId: '100', memberExternalId: '102'
+      });
     }
   });
 

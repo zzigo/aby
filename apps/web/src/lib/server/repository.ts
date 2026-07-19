@@ -107,6 +107,7 @@ function albumReleaseFields(input: AlbumEdit, albumArtist: string | null | undef
       role: repairLegacyDiacritics(role.role)
     })) } : {}),
     ...(input.notes !== undefined ? { albumNotes: input.notes ? repairLegacyDiacritics(input.notes) : input.notes } : {}),
+    ...(input.albumSet !== undefined ? { albumSet: input.albumSet } : {}),
     ...(input.collectionCode !== undefined ? { collectionCode: input.collectionCode } : {})
   };
 }
@@ -398,6 +399,7 @@ export class MemoryAbyRepository implements AbyRepository {
         catalogNumber: releaseFields.catalogNumber ?? undefined,
         albumDurationMs: releaseFields.albumDurationMs ?? undefined,
         albumNotes: releaseFields.albumNotes ?? undefined,
+        albumSet: releaseFields.albumSet ?? undefined,
         collectionCode: releaseFields.collectionCode ?? asset.canonicalMetadata.collectionCode
       };
       const track = trackEdits.get(asset.id);

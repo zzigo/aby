@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { api, AbyError, jsonBody, ownerFor } from '$lib/server/errors';
-import { getDiscogsRelease, parseDiscogsReleaseId, searchDiscogsRelease } from '$lib/server/discogs';
+import { getDiscogsRelease, parseDiscogsDuration, parseDiscogsReleaseId, searchDiscogsRelease } from '$lib/server/discogs';
 import { getRepository } from '$lib/server/repository';
 import { mergeImageCandidates } from '$lib/server/image-candidates';
 import type { RequestHandler } from './$types';
@@ -43,41 +43,74 @@ export const POST: RequestHandler = (event) => api('album.metadata.discogs', asy
 export const PUT: RequestHandler = (event) => api('album.metadata.discogs.apply', async () => {
   const ownerId = ownerFor(event);
   const repository = getRepository();
-  const input = z.object({ releaseId: z.string().regex(/^\d+$/) }).parse(await jsonBody(event));
-  const candidate = await getDiscogsRelease(input.releaseId);
+  const input = z.object({
+    releaseId: z.string().regex(/^\d+$/),
+    setPosition: z.string().trim().max(100).optional()
+  }).parse(await jsonBody(event));
+  const parentCandidate = await getDiscogsRelease(input.releaseId);
+  const setMember = input.setPosition
+    ? parentCandidate.tracklist?.find((track) => track.position?.toLowerCase() === input.setPosition?.toLowerCase())
+    : undefined;
+  if (input.setPosition && !setMember) {
+    throw new AbyError('discogs_set_member_not_found', `Discogs set member ${input.setPosition} was not found`, 404);
+  }
+  const candidate = setMember?.externalId
+    ? await getDiscogsRelease(setMember.externalId)
+    : parentCandidate;
   const items = (await repository.listCatalog(ownerId)).filter((item) => item.albumId === event.params.id);
   const first = items[0];
   if (!first) throw new AbyError('album_not_found', 'Album not found', 404);
-  const imageCandidates = candidate.coverUrl ? mergeImageCandidates([{
-    authority: 'discogs', url: candidate.coverUrl, kind: 'cover' as const, exactRelease: true,
-    sourceId: candidate.id, provenance: { canonicalUrl: candidate.canonicalUrl }
+  const selectedCover = candidate.coverUrl ? candidate : parentCandidate;
+  const imageCandidates = selectedCover.coverUrl ? mergeImageCandidates([{
+    authority: 'discogs', url: selectedCover.coverUrl, kind: 'cover' as const, exactRelease: true,
+    sourceId: selectedCover.id, provenance: { canonicalUrl: selectedCover.canonicalUrl }
   }], first.asset.canonicalMetadata.imageCandidates) : first.asset.canonicalMetadata.imageCandidates ?? [];
   const fetchedAt = new Date().toISOString();
+  const discNumber = setMember?.position?.match(/\d+/)?.[0];
+  const declaredTotal = parentCandidate.formats?.find((format) => format.name.toLowerCase() === 'cd')?.quantity;
+  const totalDiscs = declaredTotal && /^\d+$/.test(declaredTotal)
+    ? Number(declaredTotal)
+    : parentCandidate.tracklist?.filter((track) => /^CD\d+$/i.test(track.position ?? '')).length;
+  const albumSet = setMember?.position ? {
+    title: parentCandidate.title,
+    position: setMember.position,
+    ...(discNumber ? { discNumber: Number(discNumber) } : {}),
+    ...(totalDiscs ? { totalDiscs } : {}),
+    authority: 'discogs',
+    externalId: parentCandidate.id,
+    canonicalUrl: parentCandidate.canonicalUrl,
+    ...(candidate.id !== parentCandidate.id ? { memberExternalId: candidate.id, memberCanonicalUrl: candidate.canonicalUrl } : {})
+  } : undefined;
   const albumTags = [...new Set([
     ...(first.asset.canonicalMetadata.albumTags ?? []),
     ...(candidate.styles ?? [])
   ])];
+  const localDurationMs = items.reduce((total, item) => total + item.asset.technicalMetadata.durationMs, 0);
+  const memberDurationMs = setMember?.duration ? parseDiscogsDuration(setMember.duration) : undefined;
   const updated = await repository.applyAlbumMetadata(ownerId, event.params.id, {
-    title: candidate.title,
+    title: setMember
+      ? (candidate.id !== parentCandidate.id ? candidate.title : setMember.title)
+      : parentCandidate.title,
     albumArtist: candidate.creator,
     releaseDate: candidate.releaseDate || candidate.year || null,
     label: candidate.label || null,
     catalogNumber: candidate.catalogNumber || null,
-    albumDurationMs: candidate.durationMs ?? null,
+    albumDurationMs: candidate.durationMs ?? memberDurationMs ?? localDurationMs,
     albumTags,
     genres: candidate.genres ?? [],
     styles: candidate.styles ?? [],
     roles: (candidate.credits ?? []).map((credit) => ({ ...credit, authority: 'discogs' })),
     notes: candidate.notes ?? first.asset.canonicalMetadata.albumNotes ?? null,
+    albumSet: albumSet ?? null,
     collectionCode: first.asset.canonicalMetadata.collectionCode
   }, {
     ...(imageCandidates.length ? { imageCandidates } : {}),
     discogs: candidate,
+    ...(albumSet ? { albumSet } : {}),
     discogsRefreshedAt: fetchedAt,
-    metadataSources: [{
-      authority: 'discogs', externalId: candidate.id, canonicalUrl: candidate.canonicalUrl,
-      fetchedAt, reviewState: 'accepted'
-    }]
+    metadataSources: [candidate, ...(candidate.id !== parentCandidate.id ? [parentCandidate] : [])].map((source) => ({
+      authority: 'discogs', externalId: source.id, canonicalUrl: source.canonicalUrl, fetchedAt, reviewState: 'accepted' as const
+    }))
   });
-  return { items: updated, candidate };
+  return { items: updated, candidate: parentCandidate, appliedCandidate: candidate, setMember, albumSet };
 });

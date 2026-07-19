@@ -51,7 +51,7 @@ export interface DiscogsReleaseCandidate {
   genres?: string[];
   styles?: string[];
   formats?: Array<{ name: string; quantity?: string; descriptions?: string[] }>;
-  tracklist?: Array<{ position?: string; title: string; duration?: string; type?: string }>;
+  tracklist?: Array<{ position?: string; title: string; duration?: string; type?: string; externalId?: string }>;
   dataQuality?: string;
   durationMs?: number;
   notes?: string;
@@ -90,6 +90,15 @@ export function parseDiscogsReleaseId(value: string): string | undefined {
   } catch {
     return undefined;
   }
+}
+
+export function discogsSetMemberReleaseId(notes: string | undefined, position: string): string | undefined {
+  if (!notes?.trim()) return undefined;
+  const wanted = position.trim().toLowerCase();
+  for (const match of notes.matchAll(/^\s*(CD\d+)\s*:\s*\[r(\d+)\]/gim)) {
+    if (match[1]?.toLowerCase() === wanted) return match[2];
+  }
+  return undefined;
 }
 
 function headers() {
@@ -143,7 +152,10 @@ function releaseCandidate(
     ...(entry.position ? { position: entry.position } : {}),
     title: entry.title,
     ...(entry.duration ? { duration: entry.duration } : {}),
-    ...(entry.type_ ? { type: entry.type_ } : {})
+    ...(entry.type_ ? { type: entry.type_ } : {}),
+    ...(entry.position && discogsSetMemberReleaseId(release.notes, entry.position)
+      ? { externalId: discogsSetMemberReleaseId(release.notes, entry.position) }
+      : {})
   }] : []);
   const timedTracks = tracklist.filter((track) => !track.type || track.type === 'track');
   const trackDurations = timedTracks.map((track) => track.duration ? parseDiscogsDuration(track.duration) : undefined);
