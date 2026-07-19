@@ -3,18 +3,25 @@ import { readConfig } from './config';
 
 const timeout = (milliseconds = 8_000) => AbortSignal.timeout(milliseconds);
 
+function configureTmdbRequest(url: URL, config: ReturnType<typeof readConfig>) {
+  const headers: Record<string, string> = { accept: 'application/json' };
+  if (config.TMDB_READ_ACCESS_TOKEN) {
+    headers.authorization = `Bearer ${config.TMDB_READ_ACCESS_TOKEN}`;
+    return headers;
+  }
+  if (config.TMDB_API_KEY) url.searchParams.set('api_key', config.TMDB_API_KEY);
+  return headers;
+}
+
 async function tmdbCandidates(query: string, year?: number): Promise<AvMetadataCandidate[]> {
   const config = readConfig();
-  if (!config.TMDB_READ_ACCESS_TOKEN) return [];
+  if (!config.tmdbConfigured) return [];
   const url = new URL('https://api.themoviedb.org/3/search/movie');
   url.searchParams.set('query', query);
   url.searchParams.set('include_adult', 'false');
   url.searchParams.set('language', 'en-US');
   if (year) url.searchParams.set('primary_release_year', String(year));
-  const response = await fetch(url, {
-    headers: { authorization: `Bearer ${config.TMDB_READ_ACCESS_TOKEN}`, accept: 'application/json' },
-    signal: timeout()
-  });
+  const response = await fetch(url, { headers: configureTmdbRequest(url, config), signal: timeout() });
   if (!response.ok) throw new Error(`TMDB responded ${response.status}`);
   const body = await response.json() as { results?: Array<Record<string, unknown>> };
   return (body.results ?? []).slice(0, 8).map((entry) => {
@@ -93,10 +100,10 @@ export async function searchAvMetadata(query: string, year?: number): Promise<{ 
 
 export async function getTmdbMovieDetails(id: string) {
   const config = readConfig();
-  if (!config.TMDB_READ_ACCESS_TOKEN) return null;
-  const response = await fetch(`https://api.themoviedb.org/3/movie/${encodeURIComponent(id)}?append_to_response=credits,external_ids`, {
-    headers: { authorization: `Bearer ${config.TMDB_READ_ACCESS_TOKEN}`, accept: 'application/json' }, signal: timeout()
-  });
+  if (!config.tmdbConfigured) return null;
+  const url = new URL(`https://api.themoviedb.org/3/movie/${encodeURIComponent(id)}`);
+  url.searchParams.set('append_to_response', 'credits,external_ids');
+  const response = await fetch(url, { headers: configureTmdbRequest(url, config), signal: timeout() });
   if (!response.ok) throw new Error(`TMDB details responded ${response.status}`);
   const body = await response.json() as Record<string, any>;
   const director = body.credits?.crew?.find((person: Record<string, unknown>) => person.job === 'Director');

@@ -34,7 +34,7 @@ Changing the strategy changes the proposed destination, not the stable database 
 
 ## Metadata and analysis layers
 
-The first metadata query fans out to TMDB, Wikidata and Internet Archive. TMDB remains optional because it requires `TMDB_READ_ACCESS_TOKEN`; Wikidata and Internet Archive are useful for rare, experimental, Soviet, archival and educational material. IMDb IDs remain first-class external identifiers even though IMDb is not treated as an open metadata API.
+The first metadata query fans out to TMDB, Wikidata and Internet Archive. TMDB accepts `TMDB_READ_ACCESS_TOKEN` (preferred) or `TMDB_API_KEY` as a fallback; Wikidata and Internet Archive are useful for rare, experimental, Soviet, archival and educational material. IMDb IDs remain first-class external identifiers even though IMDb is not treated as an open metadata API.
 
 The following tools are declared as later workers rather than synchronous UI promises: ffmpeg inspection, VideoHash/perceptual hashes, PySceneDetect, OCR, WhisperX, CLIP scene embeddings and Qdrant indexing. PostgreSQL remains authoritative; vector indexes and analysis artifacts are reconstructible.
 
