@@ -7,6 +7,10 @@ import { AbyError } from './errors';
 type TechnicalMetadata = AvCatalogItem['technicalMetadata'];
 type OperationPatch = Partial<Pick<StorageOperation, 'state' | 'transferredBytes' | 'speedBytesPerSecond' | 'etaSeconds' | 'beaconAt' | 'error' | 'startedAt' | 'finishedAt'>>;
 
+export function postgresJson(value: unknown) {
+  return JSON.stringify(value);
+}
+
 export interface AvRepository {
   createItem(ownerId: string, bucket: string, input: AvCatalogCreate, technicalMetadata: TechnicalMetadata): Promise<{ item: AvCatalogItem; operation: StorageOperation }>;
   listItems(ownerId: string): Promise<AvCatalogItem[]>;
@@ -132,8 +136,8 @@ export class PostgresAvRepository implements AvRepository {
          (id,owner_id,bucket,source_object_key,destination_object_key,title,original_title,kind,year,director,entity,saga,country,languages,summary,poster_url,credits,external_ids,metadata_sources,technical_metadata,tree_strategy,tree_value,state)
          VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,'queued') RETURNING *`,
         [itemId, ownerId, bucket, input.sourceObjectKey, input.destinationObjectKey, input.title, input.originalTitle ?? null, input.kind, input.year ?? null,
-          input.director ?? null, input.entity ?? null, input.saga ?? null, input.country ?? null, input.languages, input.summary ?? null, input.posterUrl ?? null,
-          input.credits, input.externalIds, input.metadataSources, technicalMetadata, input.treeStrategy, input.treeValue]
+          input.director ?? null, input.entity ?? null, input.saga ?? null, input.country ?? null, postgresJson(input.languages), input.summary ?? null, input.posterUrl ?? null,
+          postgresJson(input.credits), postgresJson(input.externalIds), postgresJson(input.metadataSources), postgresJson(technicalMetadata), input.treeStrategy, input.treeValue]
       );
       const operationResult = await client.query(
         `INSERT INTO aby.storage_operations
@@ -180,7 +184,7 @@ export class PostgresAvRepository implements AvRepository {
     const result = await this.#pool.query(
       `INSERT INTO aby.captures(id,owner_id,media_kind,asset_id,av_item_id,start_time_ms,end_time_ms,label,annotations,share_token)
        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
-      [randomUUID(), ownerId, input.mediaKind, input.assetId ?? null, input.avItemId ?? null, input.startTimeMs, input.endTimeMs, input.label ?? null, input.annotations, randomBytes(24).toString('base64url')]
+      [randomUUID(), ownerId, input.mediaKind, input.assetId ?? null, input.avItemId ?? null, input.startTimeMs, input.endTimeMs, input.label ?? null, postgresJson(input.annotations), randomBytes(24).toString('base64url')]
     );
     return mapCapture(result.rows[0]);
   }

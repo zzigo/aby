@@ -3,6 +3,21 @@ import { readConfig } from './config';
 
 const timeout = (milliseconds = 8_000) => AbortSignal.timeout(milliseconds);
 
+function tmdbCandidate(entry: Record<string, any>): AvMetadataCandidate {
+  const releaseDate = typeof entry.release_date === 'string' ? entry.release_date : '';
+  const tmdbId = String(entry.id);
+  return {
+    authority: 'tmdb', externalId: tmdbId, title: String(entry.title || entry.original_title || 'Untitled'),
+    ...(entry.original_title ? { originalTitle: String(entry.original_title) } : {}),
+    ...(releaseDate ? { year: Number(releaseDate.slice(0, 4)) } : {}),
+    ...(entry.overview ? { summary: String(entry.overview) } : {}),
+    ...(entry.poster_path ? { posterUrl: `https://image.tmdb.org/t/p/w780${String(entry.poster_path)}` } : {}),
+    canonicalUrl: `https://www.themoviedb.org/movie/${tmdbId}`,
+    externalIds: { tmdb: tmdbId, ...(entry.external_ids?.imdb_id ? { imdb: String(entry.external_ids.imdb_id) } : {}) },
+    metadata: { popularity: entry.popularity, originalLanguage: entry.original_language, backdropPath: entry.backdrop_path }
+  };
+}
+
 function configureTmdbRequest(url: URL, config: ReturnType<typeof readConfig>) {
   const headers: Record<string, string> = { accept: 'application/json' };
   if (config.TMDB_READ_ACCESS_TOKEN) {
@@ -24,28 +39,21 @@ async function tmdbCandidates(query: string, year?: number): Promise<AvMetadataC
   const response = await fetch(url, { headers: configureTmdbRequest(url, config), signal: timeout() });
   if (!response.ok) throw new Error(`TMDB responded ${response.status}`);
   const body = await response.json() as { results?: Array<Record<string, unknown>> };
-  return (body.results ?? []).slice(0, 8).map((entry) => {
-    const releaseDate = typeof entry.release_date === 'string' ? entry.release_date : '';
-    const tmdbId = String(entry.id);
-    return {
-      authority: 'tmdb', externalId: tmdbId, title: String(entry.title || entry.original_title || 'Untitled'),
-      ...(entry.original_title ? { originalTitle: String(entry.original_title) } : {}),
-      ...(releaseDate ? { year: Number(releaseDate.slice(0, 4)) } : {}),
-      ...(entry.overview ? { summary: String(entry.overview) } : {}),
-      ...(entry.poster_path ? { posterUrl: `https://image.tmdb.org/t/p/w780${String(entry.poster_path)}` } : {}),
-      canonicalUrl: `https://www.themoviedb.org/movie/${tmdbId}`,
-      externalIds: { tmdb: tmdbId },
-      metadata: { popularity: entry.popularity, originalLanguage: entry.original_language, backdropPath: entry.backdrop_path }
-    } satisfies AvMetadataCandidate;
-  });
+  return (body.results ?? []).slice(0, 8).map(tmdbCandidate);
 }
 
 async function wikidataCandidates(query: string): Promise<AvMetadataCandidate[]> {
   const url = new URL('https://www.wikidata.org/w/api.php');
   url.search = new URLSearchParams({ action: 'wbsearchentities', search: `${query} film`, language: 'en', uselang: 'en', type: 'item', limit: '8', format: 'json', origin: '*' }).toString();
-  const response = await fetch(url, { headers: { 'user-agent': 'Aby/0.1 (https://aby.zztt.org)' }, signal: timeout() });
+  let response = await fetch(url, { headers: { 'user-agent': 'Aby/0.1 (https://aby.zztt.org)' }, signal: timeout() });
   if (!response.ok) throw new Error(`Wikidata responded ${response.status}`);
-  const body = await response.json() as { search?: Array<{ id: string; label: string; description?: string; concepturi?: string }> };
+  let body = await response.json() as { search?: Array<{ id: string; label: string; description?: string; concepturi?: string }> };
+  if (!body.search?.length) {
+    url.searchParams.set('search', query);
+    response = await fetch(url, { headers: { 'user-agent': 'Aby/0.1 (https://aby.zztt.org)' }, signal: timeout() });
+    if (!response.ok) throw new Error(`Wikidata fallback responded ${response.status}`);
+    body = await response.json() as typeof body;
+  }
   return (body.search ?? []).map((entry) => ({
     authority: 'wikidata', externalId: entry.id, title: entry.label,
     ...(entry.description ? { summary: entry.description } : {}),
@@ -81,6 +89,60 @@ async function internetArchiveCandidates(query: string, year?: number): Promise<
 }
 
 export type AvMetadataService = 'tmdb' | 'wikidata' | 'internet-archive';
+
+async function wikidataCandidateById(id: string): Promise<AvMetadataCandidate | null> {
+  if (!/^Q\d+$/i.test(id)) return null;
+  const qid = id.toUpperCase();
+  const url = new URL('https://www.wikidata.org/w/api.php');
+  url.search = new URLSearchParams({ action: 'wbgetentities', ids: qid, languages: 'en', props: 'labels|descriptions|claims', format: 'json', origin: '*' }).toString();
+  const response = await fetch(url, { headers: { 'user-agent': 'Aby/0.1 (https://aby.zztt.org)' }, signal: timeout() });
+  if (!response.ok) throw new Error(`Wikidata entity responded ${response.status}`);
+  const body = await response.json() as { entities?: Record<string, any> };
+  const entity = body.entities?.[qid];
+  if (!entity || entity.missing !== undefined) return null;
+  const claimValue = (property: string) => entity.claims?.[property]?.[0]?.mainsnak?.datavalue?.value;
+  const publication = claimValue('P577')?.time as string | undefined;
+  const image = claimValue('P18') as string | undefined;
+  const imdb = claimValue('P345') as string | undefined;
+  const tmdb = claimValue('P4947') as string | undefined;
+  return {
+    authority: 'wikidata', externalId: qid, title: entity.labels?.en?.value || qid,
+    ...(publication ? { year: Number(publication.slice(1, 5)) } : {}),
+    ...(entity.descriptions?.en?.value ? { summary: String(entity.descriptions.en.value) } : {}),
+    ...(image ? { posterUrl: `https://commons.wikimedia.org/wiki/Special:Redirect/file/${encodeURIComponent(image)}?width=780` } : {}),
+    canonicalUrl: `https://www.wikidata.org/wiki/${qid}`,
+    externalIds: { wikidata: qid, ...(imdb ? { imdb } : {}), ...(tmdb ? { tmdb: String(tmdb) } : {}) }, metadata: {}
+  };
+}
+
+async function internetArchiveCandidateById(id: string): Promise<AvMetadataCandidate | null> {
+  if (!id.trim()) return null;
+  const identifier = id.trim();
+  const response = await fetch(`https://archive.org/metadata/${encodeURIComponent(identifier)}`, { headers: { 'user-agent': 'Aby/0.1 (https://aby.zztt.org)' }, signal: timeout(15_000) });
+  if (!response.ok) throw new Error(`Internet Archive metadata responded ${response.status}`);
+  const body = await response.json() as { metadata?: Record<string, unknown> };
+  const entry = body.metadata;
+  if (!entry?.identifier) return null;
+  const parsedYear = Number(Array.isArray(entry.year) ? entry.year[0] : entry.year);
+  const description = Array.isArray(entry.description) ? entry.description.join('\n') : entry.description;
+  return {
+    authority: 'internet-archive', externalId: identifier, title: String(entry.title || identifier),
+    ...(Number.isInteger(parsedYear) ? { year: parsedYear } : {}),
+    ...(description ? { summary: String(description).slice(0, 10_000) } : {}),
+    canonicalUrl: `https://archive.org/details/${encodeURIComponent(identifier)}`,
+    externalIds: { internetArchive: identifier }, metadata: { creator: entry.creator }
+  };
+}
+
+export async function lookupAvMetadataById(service: AvMetadataService, id: string) {
+  if (service === 'tmdb') {
+    const details = await getTmdbMovieDetails(id);
+    return { candidates: details?.candidate ? [details.candidate] : [], services: { tmdb: details ? 'ok' : 'not-found' }, details };
+  }
+  const candidate = service === 'wikidata' ? await wikidataCandidateById(id) : await internetArchiveCandidateById(id);
+  const label = service === 'internet-archive' ? 'internetArchive' : 'wikidata';
+  return { candidates: candidate ? [candidate] : [], services: { [label]: candidate ? 'ok' : 'not-found' } };
+}
 
 export async function searchAvMetadata(query: string, year?: number, requested?: AvMetadataService): Promise<{ candidates: AvMetadataCandidate[]; services: Record<string, string> }> {
   const config = readConfig();
@@ -121,6 +183,7 @@ export async function getTmdbMovieDetails(id: string) {
     }))
   ];
   return {
+    candidate: tmdbCandidate(body),
     director: director?.name ? String(director.name) : '', credits,
     country: body.production_countries?.[0]?.iso_3166_1 ? String(body.production_countries[0].iso_3166_1) : '',
     languages: (body.spoken_languages ?? []).map((language: Record<string, unknown>) => String(language.iso_639_1 || language.english_name)).filter(Boolean),

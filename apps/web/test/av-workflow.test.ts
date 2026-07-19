@@ -1,7 +1,12 @@
 import { describe, expect, test } from 'bun:test';
-import { MemoryAvRepository } from '../src/lib/server/av-repository';
+import { MemoryAvRepository, postgresJson } from '../src/lib/server/av-repository';
 
 describe('deferred AV catalog workflow', () => {
+  test('serializes every array as JSONB rather than a PostgreSQL array literal', () => {
+    expect(postgresJson(['ru', 'en'])).toBe('["ru","en"]');
+    expect(postgresJson([{ name: 'Andrei Tarkovsky', role: 'Director', externalIds: {} }])).toBe('[{"name":"Andrei Tarkovsky","role":"Director","externalIds":{}}]');
+  });
+
   test('catalogs metadata and creates a pending copy without promoting bytes', async () => {
     const repository = new MemoryAvRepository();
     const created = await repository.createItem('owner-a', 'zzttuntref', {

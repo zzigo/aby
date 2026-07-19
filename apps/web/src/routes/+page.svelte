@@ -381,11 +381,11 @@
   <meta name="description" content="Private temporal media inspection with explicit provenance." />
 </svelte:head>
 
-<main>
+<main class="audio-inspect">
   <section class="intro">
     <div>
-      <span class="eyebrow">Phase 1 · one work at a time</span>
-      <h1>Listen closely.<br />Commit deliberately.</h1>
+      <span class="eyebrow">AUDIO ADOPTION · PREVIEW BEFORE WRITE</span>
+      <h1>Inspect the sound.<br />Commit the metadata.</h1>
     </div>
     <div class="intro-context">
       <p>Aby keeps the original file untouched, separates machine candidates from canonical metadata, and treats segments as temporal references before they become files.</p>
@@ -403,7 +403,7 @@
       <p>{data.user ? 'Scan legacy source pools and pick a random candidate to adopt.' : 'Authentication uses the same Logto identity as Seshat and Musiki.'}</p>
       {#if data.user}
         <div style="display: flex; gap: 8px; margin-top: 8px;">
-          <button class="primary" onclick={surpriseMe} disabled={busy} style="flex: 1;">Surprise me!</button>
+          <button class="secondary signal-outline" onclick={surpriseMe} disabled={busy} style="flex: 1;">SURPRISE ME · AUDIO</button>
           <button class="secondary" onclick={toggleSurf} disabled={busy} style="flex: 1;">Surf sources</button>
         </div>
 
@@ -640,4 +640,5 @@
   .retirement-folder{max-width:480px}.retirement-folder strong{display:block;color:#fff;font-weight:500;overflow-wrap:anywhere}.retirement-section td small{display:block;margin-top:4px;color:var(--muted)}.retirement-result{color:var(--signal)!important}.retirement-state{text-transform:uppercase;color:var(--muted)}.retirement-state.verified{color:var(--signal)}.retirement-state.blocked{color:#ff8b70}
   .retirement-actions{display:flex;gap:6px;justify-content:flex-end}.retirement-actions button{border:1px solid var(--line);background:transparent;color:#fff;padding:7px 10px;font:9px ui-monospace,monospace;cursor:pointer}.retirement-actions button:disabled{opacity:.28;cursor:not-allowed}.retirement-actions .delete-source:not(:disabled){border-color:#ff765f;color:#ff8b70}.empty-retirement{padding:30px!important;text-align:center!important;color:var(--muted)}.visually-hidden{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
   @media(max-width:760px){.setup-grid{grid-template-columns:1fr auto}.setup-grid label{grid-column:span 2}.save-setup{grid-column:span 2}.retirement-section{margin-top:42px}.retirement-section>header{padding:15px}.retirement-intro{padding:14px 15px}}
+  .audio-inspect{max-width:1500px;padding-top:64px}.audio-inspect .intro{margin-bottom:54px}.audio-inspect .workflow article{background:var(--surface);border-color:var(--line)}.audio-inspect .workflow article header span{color:var(--signal)}.audio-inspect .signal-outline{border-color:var(--signal);color:var(--signal);background:transparent;font:700 11.5px ui-monospace,monospace;letter-spacing:.04em}.audio-inspect .signal-outline:hover:not(:disabled){background:#c6ff5212}.audio-inspect label{font-size:12.65px}.audio-inspect .status-line{font-size:14.95px}.audio-inspect .surf-item-btn span{font-size:11.5px!important}.audio-inspect .surf-count{font-size:10.35px}
 </style>
