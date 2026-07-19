@@ -3,6 +3,15 @@ import { readConfig } from './config';
 
 const timeout = (milliseconds = 8_000) => AbortSignal.timeout(milliseconds);
 
+async function fetchWithRetry(url:URL|string,init:RequestInit,attempts=2):Promise<Response> {
+  let response=await fetch(url,init);
+  for(let attempt=1;attempt<attempts&&[429,500,502,503,504].includes(response.status);attempt+=1){
+    await new Promise((resolve)=>setTimeout(resolve,300*attempt));
+    response=await fetch(url,{...init,signal:timeout(15_000)});
+  }
+  return response;
+}
+
 function tmdbCandidate(entry: Record<string, any>): AvMetadataCandidate {
   const releaseDate = typeof entry.release_date === 'string' ? entry.release_date : '';
   const tmdbId = String(entry.id);
@@ -100,7 +109,7 @@ async function internetArchiveCandidates(query: string, year?: number): Promise<
   url.searchParams.set('rows', '8');
   url.searchParams.set('page', '1');
   url.searchParams.set('output', 'json');
-  const response = await fetch(url, { headers: { 'user-agent': 'Aby/0.1 (https://aby.zztt.org)' }, signal: timeout(15_000) });
+  const response = await fetchWithRetry(url, { headers: { 'user-agent': 'Aby/0.1 (https://aby.zztt.org)' }, signal: timeout(15_000) });
   if (!response.ok) throw new Error(`Internet Archive responded ${response.status}`);
   const body = await response.json() as { response?: { docs?: Array<Record<string, unknown>> } };
   return (body.response?.docs ?? []).map((entry) => {
@@ -147,7 +156,7 @@ async function wikidataCandidateById(id: string): Promise<AvMetadataCandidate | 
 async function internetArchiveCandidateById(id: string): Promise<AvMetadataCandidate | null> {
   if (!id.trim()) return null;
   const identifier = id.trim();
-  const response = await fetch(`https://archive.org/metadata/${encodeURIComponent(identifier)}`, { headers: { 'user-agent': 'Aby/0.1 (https://aby.zztt.org)' }, signal: timeout(15_000) });
+  const response = await fetchWithRetry(`https://archive.org/metadata/${encodeURIComponent(identifier)}`, { headers: { 'user-agent': 'Aby/0.1 (https://aby.zztt.org)' }, signal: timeout(15_000) });
   if (!response.ok) throw new Error(`Internet Archive metadata responded ${response.status}`);
   const body = await response.json() as { metadata?: Record<string, unknown> };
   const entry = body.metadata;
