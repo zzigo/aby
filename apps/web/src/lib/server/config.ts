@@ -24,6 +24,7 @@ const EnvironmentSchema = z.object({
   FFPROBE_TIMEOUT_MS: z.coerce.number().int().min(1_000).max(120_000).default(30_000),
   FFMPEG_PATH: z.string().trim().default('ffmpeg'),
   FFMPEG_ANALYSIS_TIMEOUT_MS: z.coerce.number().int().min(10_000).max(1_800_000).default(900_000),
+  FFMPEG_TRANSCODE_TIMEOUT_MS: z.coerce.number().int().min(60_000).max(86_400_000).default(21_600_000),
   FPCALC_PATH: z.string().trim().default('fpcalc'),
   RCLONE_PATH: z.string().trim().default('rclone'),
   RCLONE_WASABI_ROOT: z.string().trim().regex(/^[A-Za-z0-9_-]+:[^\r\n]*$/).default('wasabi:zzttuntref/'),

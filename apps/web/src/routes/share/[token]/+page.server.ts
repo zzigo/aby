@@ -1,7 +1,8 @@
 import { error } from '@sveltejs/kit';
 import { getAvRepository } from '$lib/server/av-repository';
 import { getRepository } from '$lib/server/repository';
-import { artifactUrl, playbackUrl, sourceVideoPlaybackUrl } from '$lib/server/storage';
+import { playbackUrl } from '$lib/server/storage';
+import { playableVideoDelivery } from '$lib/server/av-video-proxies';
 import type { PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async ({ params }) => {
@@ -10,9 +11,7 @@ export const load: PageServerLoad = async ({ params }) => {
   if (capture.avItemId) {
     const item = await getAvRepository().getItem(capture.ownerId, capture.avItemId);
     if (!item) error(404, 'Capture source not found');
-    const delivery = item.state === 'available'
-      ? await artifactUrl(item.destinationObjectKey, item.technicalMetadata.contentType ?? 'video/mp4')
-      : await sourceVideoPlaybackUrl(item.sourceObjectKey);
+    const delivery = await playableVideoDelivery(item);
     return { capture, title: item.title, subtitle: item.director ?? item.entity ?? '', mediaUrl: delivery.url, posterUrl: item.posterUrl ?? '' };
   }
   const asset = await getRepository().getAsset(capture.ownerId, capture.assetId!);
