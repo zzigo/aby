@@ -21,6 +21,22 @@ describe('deferred AV catalog workflow', () => {
     expect(created.operation.transferredBytes).toBe(0);
   });
 
+  test('keeps neighboring subtitles in the same deferred copy total', async () => {
+    const repository = new MemoryAvRepository();
+    const created = await repository.createItem('owner-a', 'zzttuntref', {
+      sourceObjectKey: 'mov/Frances Ha/Frances.Ha.mkv', destinationObjectKey: 'aby/mov/gerwig/2012-Frances Ha/Frances.Ha.mkv',
+      title: 'Frances Ha', kind: 'film', year: 2012, countries: ['US'], languages: ['en'], tags: [], credits: [],
+      externalIds: {}, metadataSources: [], treeStrategy: 'author', treeValue: 'Gerwig'
+    }, {
+      sizeBytes: 1_000, sidecarSubtitles: [{
+        sourceObjectKey: 'mov/Frances Ha/Frances.Ha.es.srt', destinationObjectKey: 'aby/mov/gerwig/2012-Frances Ha/Frances.Ha.es.srt',
+        language: 'es', sizeBytes: 125
+      }]
+    });
+    expect(created.item.technicalMetadata.sidecarSubtitles?.[0]?.language).toBe('es');
+    expect(created.operation.sizeBytes).toBe(1_125);
+  });
+
   test('creates an immutable-time share capture for a staged video', async () => {
     const repository = new MemoryAvRepository();
     const { item } = await repository.createItem('owner-a', 'zzttuntref', {

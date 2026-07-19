@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import pg from 'pg';
-import type { AlbumEdit, Asset, CatalogItem, ConversionSettings, IngestPreview, Provenance, Segment, SegmentCreate, TimedTextDocument, TrackEdit } from '@zztt/aby-domain';
+import type { AlbumEdit, Asset, AvSubtitleSettings, CatalogItem, ConversionSettings, IngestPreview, Provenance, Segment, SegmentCreate, TimedTextDocument, TrackEdit } from '@zztt/aby-domain';
 import { AbyError } from './errors';
 import { readConfig } from './config';
 import { parseTrackTitle } from './track-title';
@@ -70,6 +70,8 @@ export interface AbyRepository {
   softDeleteAsset(ownerId: string, assetId: string): Promise<void>;
   getConversionSettings(ownerId: string): Promise<ConversionSettings>;
   saveConversionSettings(ownerId: string, settings: ConversionSettings): Promise<ConversionSettings>;
+  getAvSubtitleSettings(ownerId: string): Promise<AvSubtitleSettings>;
+  saveAvSubtitleSettings(ownerId: string, settings: AvSubtitleSettings): Promise<AvSubtitleSettings>;
   mergeCanonicalMetadata(ownerId: string, assetId: string, metadata: Record<string, unknown>): Promise<CatalogItem>;
   relocateAsset(ownerId: string, assetId: string, sourceObjectKey: string, targetObjectKey: string, collectionCode: string, entitySlug?: string): Promise<CatalogItem>;
   objectKeyInUse(objectKey: string): Promise<boolean>;
@@ -123,6 +125,7 @@ export class MemoryAbyRepository implements AbyRepository {
   readonly #spectrograms = new Map<string, SpectrogramAnalysis>();
   readonly #timedText = new Map<string, TimedTextDocument[]>();
   readonly #settings = new Map<string, ConversionSettings>();
+  readonly #avSubtitleSettings = new Map<string, AvSubtitleSettings>();
 
   async savePreview(preview: IngestPreview): Promise<IngestPreview> {
     this.#previews.set(preview.id, structuredClone(preview));
@@ -434,6 +437,15 @@ export class MemoryAbyRepository implements AbyRepository {
 
   async saveConversionSettings(ownerId: string, settings: ConversionSettings): Promise<ConversionSettings> {
     this.#settings.set(ownerId, structuredClone(settings));
+    return structuredClone(settings);
+  }
+
+  async getAvSubtitleSettings(ownerId: string): Promise<AvSubtitleSettings> {
+    return structuredClone(this.#avSubtitleSettings.get(ownerId) ?? { languages: ['en', 'es'], includeHearingImpaired: true });
+  }
+
+  async saveAvSubtitleSettings(ownerId: string, settings: AvSubtitleSettings): Promise<AvSubtitleSettings> {
+    this.#avSubtitleSettings.set(ownerId, structuredClone(settings));
     return structuredClone(settings);
   }
 
@@ -1251,6 +1263,21 @@ export class PostgresAbyRepository implements AbyRepository {
       [ownerId, settings]
     );
     return result.rows[0].conversion;
+  }
+
+  async getAvSubtitleSettings(ownerId: string): Promise<AvSubtitleSettings> {
+    const result = await this.#pool.query('SELECT av_subtitles FROM aby.user_settings WHERE owner_id=$1', [ownerId]);
+    return result.rows[0]?.av_subtitles ?? { languages: ['en', 'es'], includeHearingImpaired: true };
+  }
+
+  async saveAvSubtitleSettings(ownerId: string, settings: AvSubtitleSettings): Promise<AvSubtitleSettings> {
+    const result = await this.#pool.query(
+      `INSERT INTO aby.user_settings(owner_id,av_subtitles) VALUES($1,$2)
+       ON CONFLICT(owner_id) DO UPDATE SET av_subtitles=excluded.av_subtitles,updated_at=now()
+       RETURNING av_subtitles`,
+      [ownerId, settings]
+    );
+    return result.rows[0].av_subtitles;
   }
 
   async mergeCanonicalMetadata(ownerId: string, assetId: string, metadata: Record<string, unknown>): Promise<CatalogItem> {

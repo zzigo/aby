@@ -3,6 +3,8 @@ import { createInterface } from 'node:readline';
 import { readConfig } from './config';
 import { AbyError } from './errors';
 import { getAvRepository } from './av-repository';
+import { discoverAvSidecars } from './av-inspection';
+import { basename, dirname } from 'node:path';
 
 const running = new Set<string>();
 
@@ -25,6 +27,29 @@ function progressFromLine(line: string) {
   } catch { return {}; }
 }
 
+function copyOne(source: string, destination: string, completedBytes: number, observe: (progress: ReturnType<typeof progressFromLine>) => void): Promise<void> {
+  const config = readConfig();
+  return new Promise((resolve, reject) => {
+    const child = spawn(config.RCLONE_PATH, [
+      'copyto', remotePath(config.RCLONE_WASABI_ROOT, source), remotePath(config.RCLONE_WASABI_ROOT, destination),
+      '--no-traverse', '--stats', '1s', '--stats-one-line-json', '--log-level', 'INFO'
+    ], { stdio: ['ignore', 'pipe', 'pipe'] });
+    let lastError = '';
+    const onLine = (line: string) => {
+      const progress = progressFromLine(line);
+      if (!Object.keys(progress).length) {
+        if (/error|failed/i.test(line)) lastError = line.slice(0, 2_000);
+        return;
+      }
+      observe({ ...progress, ...(progress.transferredBytes !== undefined ? { transferredBytes: completedBytes + progress.transferredBytes } : {}) });
+    };
+    createInterface({ input: child.stdout }).on('line', onLine);
+    createInterface({ input: child.stderr }).on('line', onLine);
+    child.once('error', reject);
+    child.once('close', (code) => code === 0 ? resolve() : reject(new Error(lastError || `rclone exited with code ${code}`)));
+  });
+}
+
 export async function executeStorageOperation(ownerId: string, operationId: string): Promise<void> {
   const repository = getAvRepository();
   const operation = await repository.getOperation(ownerId, operationId);
@@ -34,55 +59,53 @@ export async function executeStorageOperation(ownerId: string, operationId: stri
     throw new AbyError('operation_running', 'Storage operation has a current process beacon', 409);
   }
   if (operation.state === 'succeeded' || operation.state === 'cancelled') throw new AbyError('operation_not_executable', 'Storage operation is already final', 409);
-  const config = readConfig();
+  const storedItem = await repository.getItem(ownerId, operation.avItemId);
+  if (!storedItem) throw new AbyError('av_item_not_found', 'AV item not found', 404);
+  const item = storedItem.technicalMetadata.sidecarSubtitles ? storedItem : await repository.updateItemTechnicalMetadata(ownerId, storedItem.id, {
+    ...storedItem.technicalMetadata,
+    sidecarSubtitles: (await discoverAvSidecars(storedItem.sourceObjectKey)).map((sidecar) => ({
+      ...sidecar, destinationObjectKey: `${dirname(storedItem.destinationObjectKey)}/${basename(sidecar.sourceObjectKey)}`
+    }))
+  });
+  const totalSizeBytes = item.technicalMetadata.sizeBytes + (item.technicalMetadata.sidecarSubtitles ?? []).reduce((total, subtitle) => total + subtitle.sizeBytes, 0);
+  if (operation.sizeBytes !== totalSizeBytes) await repository.updateOperation(ownerId, operationId, { sizeBytes: totalSizeBytes });
   running.add(operationId);
   const startedAt = new Date().toISOString();
   await repository.updateOperation(ownerId, operationId, { state: 'running', startedAt, beaconAt: startedAt, error: undefined });
   await repository.setItemState(ownerId, operation.avItemId, 'copying');
 
-  const child = spawn(config.RCLONE_PATH, [
-    'copyto',
-    remotePath(config.RCLONE_WASABI_ROOT, operation.sourceObjectKey),
-    remotePath(config.RCLONE_WASABI_ROOT, operation.destinationObjectKey),
-    '--no-traverse', '--stats', '1s', '--stats-one-line-json', '--log-level', 'INFO'
-  ], { stdio: ['ignore', 'pipe', 'pipe'] });
-  let lastError = '';
-  let updateChain = Promise.resolve();
-  const observe = (line: string) => {
-    const progress = progressFromLine(line);
-    if (!Object.keys(progress).length) {
-      if (/error|failed/i.test(line)) lastError = line.slice(0, 2_000);
-      return;
-    }
-    updateChain = updateChain.then(() => repository.updateOperation(ownerId, operationId, {
-      ...progress, beaconAt: new Date().toISOString()
-    })).then(() => undefined).catch(() => undefined);
-  };
-  createInterface({ input: child.stdout }).on('line', observe);
-  createInterface({ input: child.stderr }).on('line', observe);
-  child.once('error', async (error) => {
-    await updateChain;
-    const finishedAt = new Date().toISOString();
-    await repository.updateOperation(ownerId, operationId, { state: 'failed', error: error.message, beaconAt: finishedAt, finishedAt });
-    await repository.setItemState(ownerId, operation.avItemId, 'failed');
-    running.delete(operationId);
-  });
-  child.once('close', async (code) => {
-    await updateChain;
-    if (!running.has(operationId)) return;
-    const finishedAt = new Date().toISOString();
-    if (code === 0) {
+  const files = [
+    { source: operation.sourceObjectKey, destination: operation.destinationObjectKey, sizeBytes: item.technicalMetadata.sizeBytes },
+    ...(item.technicalMetadata.sidecarSubtitles ?? []).map((subtitle) => ({ source: subtitle.sourceObjectKey, destination: subtitle.destinationObjectKey, sizeBytes: subtitle.sizeBytes }))
+  ];
+  void (async () => {
+    let completedBytes = 0;
+    let updateChain = Promise.resolve();
+    try {
+      for (const file of files) {
+        await copyOne(file.source, file.destination, completedBytes, (progress) => {
+          updateChain = updateChain.then(() => repository.updateOperation(ownerId, operationId, {
+            ...progress, beaconAt: new Date().toISOString()
+          })).then(() => undefined).catch(() => undefined);
+        });
+        completedBytes += file.sizeBytes;
+      }
+      await updateChain;
+      const finishedAt = new Date().toISOString();
       await repository.updateOperation(ownerId, operationId, {
-        state: 'succeeded', transferredBytes: operation.sizeBytes, speedBytesPerSecond: 0,
+        state: 'succeeded', transferredBytes: totalSizeBytes, speedBytesPerSecond: 0,
         etaSeconds: 0, beaconAt: finishedAt, finishedAt, error: undefined
       });
       await repository.setItemState(ownerId, operation.avItemId, 'available');
-    } else {
+    } catch (error) {
+      await updateChain;
+      const finishedAt = new Date().toISOString();
       await repository.updateOperation(ownerId, operationId, {
-        state: 'failed', error: lastError || `rclone exited with code ${code}`, beaconAt: finishedAt, finishedAt
+        state: 'failed', error: error instanceof Error ? error.message : 'rclone failed', beaconAt: finishedAt, finishedAt
       });
       await repository.setItemState(ownerId, operation.avItemId, 'failed');
+    } finally {
+      running.delete(operationId);
     }
-    running.delete(operationId);
-  });
+  })();
 }

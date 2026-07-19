@@ -6,6 +6,7 @@ import { readConfig } from '$lib/server/config';
 import { assertSourceObjectKey, headWasabiSourceObject } from '$lib/server/storage';
 import { getAvInspection } from '$lib/server/av-inspection';
 import type { RequestHandler } from './$types';
+import { basename, dirname } from 'node:path';
 
 export const GET: RequestHandler = (event) => api('av.items.list', async () => ({
   items: await getAvRepository().listItems(ownerFor(event))
@@ -23,13 +24,18 @@ export const POST: RequestHandler = (event) => api('av.items.create', async () =
   });
   const head = await headWasabiSourceObject(sourceObjectKey);
   const inspection = inspectionId ? getAvInspection(ownerId, inspectionId, sourceObjectKey) : null;
+  const sidecarSubtitles = (inspection?.sidecarSubtitles ?? []).map((sidecar) => ({
+    ...sidecar,
+    destinationObjectKey: `${dirname(destinationObjectKey)}/${basename(sidecar.sourceObjectKey)}`
+  }));
   const created = await getAvRepository().createItem(ownerId, config.WASABI_BUCKET!, {
     ...input, sourceObjectKey, destinationObjectKey
   }, {
     ...(inspection?.technicalMetadata ?? {}),
     sizeBytes: head.sizeBytes ?? inspection?.technicalMetadata.sizeBytes ?? 0,
     ...(head.contentType ? { contentType: head.contentType } : {}),
-    ...(head.etag ? { etag: head.etag } : {})
+    ...(head.etag ? { etag: head.etag } : {}),
+    ...(sidecarSubtitles.length ? { sidecarSubtitles } : {})
   });
   return { ...created, copied: false, message: 'Metadata cataloged. Bytes remain in mov/ until EXECUTE.' };
 });

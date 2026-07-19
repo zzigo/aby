@@ -103,6 +103,10 @@ async function canonicalHeadOrNull(objectKey: string) {
   }
 }
 
+export async function headWasabiObjectOrNull(objectKey: string) {
+  return canonicalHeadOrNull(objectKey);
+}
+
 export async function copyWasabiSourceToCanonical(sourceObjectKey: string, targetObjectKey: string) {
   const config = readConfig();
   const sourceKey = assertSourceObjectKey(sourceObjectKey, [config.sourceAudioPrefix, config.sourceVideoPrefix]);
@@ -267,4 +271,22 @@ export async function listWasabiSiblingKeys(objectKey: string): Promise<string[]
     continuationToken = response.IsTruncated ? response.NextContinuationToken : undefined;
   } while (continuationToken);
   return keys.sort((left, right) => left.localeCompare(right, undefined, { numeric: true }));
+}
+
+export async function listWasabiSidecarSubtitles(objectKey: string): Promise<Array<{ objectKey: string; sizeBytes: number }>> {
+  const config = readConfig();
+  const bucket = config.WASABI_BUCKET!;
+  const root = config.wasabiRootPrefix ? normalizeObjectKey(config.wasabiRootPrefix).replace(/\/+$/, '') + '/' : '';
+  const videoKey = assertSourceObjectKey(objectKey, [config.sourceVideoPrefix]);
+  const dir = dirname(videoKey);
+  const videoStem = videoKey.split('/').at(-1)!.replace(/\.[^.]+$/, '').toLocaleLowerCase();
+  const response = await wasabiClient().send(new ListObjectsV2Command({ Bucket: bucket, Prefix: `${root}${dir}/` }));
+  return (response.Contents ?? []).flatMap((object) => {
+    if (!object.Key || extname(object.Key).toLocaleLowerCase() !== '.srt') return [];
+    const logicalKey = root && object.Key.startsWith(root) ? object.Key.slice(root.length) : object.Key;
+    if (dirname(logicalKey) !== dir) return [];
+    const subtitleStem = logicalKey.split('/').at(-1)!.replace(/\.srt$/i, '').toLocaleLowerCase();
+    if (subtitleStem !== videoStem && !subtitleStem.startsWith(`${videoStem}.`) && !subtitleStem.startsWith(`${videoStem}-`) && !subtitleStem.startsWith(`${videoStem}_`)) return [];
+    return [{ objectKey: logicalKey, sizeBytes: Number(object.Size ?? 0) }];
+  }).sort((left, right) => left.objectKey.localeCompare(right.objectKey, undefined, { numeric: true }));
 }

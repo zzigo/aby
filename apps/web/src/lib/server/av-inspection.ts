@@ -4,7 +4,7 @@ import type { AvCatalogItem } from '@zztt/aby-domain';
 import { ffprobeFile } from '@zztt/aby-media-ingest';
 import { AbyError } from './errors';
 import { readConfig } from './config';
-import { assertSourceObjectKey, headWasabiSourceObject, sourceVideoPlaybackUrl } from './storage';
+import { assertSourceObjectKey, headWasabiSourceObject, listWasabiSidecarSubtitles, sourceVideoPlaybackUrl } from './storage';
 
 const VIDEO_EXTENSIONS = new Set(['.mkv', '.mov', '.vob', '.mp4', '.m4v', '.avi', '.webm']);
 const INSPECTION_TTL_MS = 30 * 60_000;
@@ -17,6 +17,7 @@ export type AvInspection = {
   playbackUrl: string;
   playbackExpiresAt: string;
   technicalMetadata: AvCatalogItem['technicalMetadata'];
+  sidecarSubtitles: Array<{ sourceObjectKey: string; language?: string; title?: string; forced?: boolean; hearingImpaired?: boolean; sizeBytes: number }>;
   embeddedMetadata: {
     title: string;
     originalTitle?: string;
@@ -49,15 +50,33 @@ function pruneInspections() {
   for (const [id, inspection] of inspections) if (inspection.expiresAt <= current) inspections.delete(id);
 }
 
+function describeSidecar(objectKey: string) {
+  const stem = basename(objectKey).replace(/\.srt$/i, '');
+  const parts = stem.split(/[._-]+/);
+  const language = [...parts].reverse().find((part) => /^[a-z]{2,3}(?:-[a-z0-9]{2,8})?$/i.test(part))?.toLocaleLowerCase();
+  return {
+    ...(language ? { language } : {}),
+    ...(parts.some((part) => /^forced$/i.test(part)) ? { forced: true } : {}),
+    ...(parts.some((part) => /^(sdh|hi|hearing.?impaired)$/i.test(part)) ? { hearingImpaired: true } : {}),
+    title: basename(objectKey)
+  };
+}
+
+export async function discoverAvSidecars(sourceObjectKey: string) {
+  const sidecars = await listWasabiSidecarSubtitles(sourceObjectKey);
+  return sidecars.map((sidecar) => ({ ...sidecar, ...describeSidecar(sidecar.objectKey), sourceObjectKey: sidecar.objectKey }));
+}
+
 export async function inspectAvSource(ownerId: string, requestedKey: string): Promise<AvInspection> {
   const config = readConfig();
   const sourceObjectKey = assertSourceObjectKey(requestedKey, [config.sourceVideoPrefix]);
   if (!VIDEO_EXTENSIONS.has(extname(sourceObjectKey).toLocaleLowerCase())) {
     throw new AbyError('unsupported_video_source', 'Choose an MKV, MOV, VOB, MP4, M4V, AVI or WebM source', 400);
   }
-  const [head, playback] = await Promise.all([
+  const [head, playback, sidecars] = await Promise.all([
     headWasabiSourceObject(sourceObjectKey),
-    sourceVideoPlaybackUrl(sourceObjectKey)
+    sourceVideoPlaybackUrl(sourceObjectKey),
+    discoverAvSidecars(sourceObjectKey)
   ]);
   const originalFilename = basename(sourceObjectKey);
   let technicalMetadata: AvCatalogItem['technicalMetadata'] = {
@@ -76,7 +95,9 @@ export async function inspectAvSource(ownerId: string, requestedKey: string): Pr
       ...(probe.metadata.videoCodec ? { videoCodec: probe.metadata.videoCodec } : {}),
       ...(probe.metadata.audioCodec ? { audioCodec: probe.metadata.audioCodec } : {}),
       ...(probe.metadata.width ? { width: probe.metadata.width } : {}),
-      ...(probe.metadata.height ? { height: probe.metadata.height } : {})
+      ...(probe.metadata.height ? { height: probe.metadata.height } : {}),
+      ...(probe.metadata.audioTracks ? { audioTracks: probe.metadata.audioTracks } : {}),
+      ...(probe.metadata.subtitleTracks ? { subtitleTracks: probe.metadata.subtitleTracks } : {})
     };
     probeState = 'ok';
   } catch {
@@ -94,7 +115,7 @@ export async function inspectAvSource(ownerId: string, requestedKey: string): Pr
   const inspection: AvInspection = {
     id: randomUUID(), ownerId, sourceObjectKey, originalFilename,
     playbackUrl: playback.url, playbackExpiresAt: playback.expiresAt,
-    technicalMetadata,
+    technicalMetadata, sidecarSubtitles: sidecars,
     embeddedMetadata: {
       title: embeddedTitle,
       ...(originalTitle ? { originalTitle } : {}),

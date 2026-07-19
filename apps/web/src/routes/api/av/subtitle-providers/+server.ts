@@ -12,6 +12,10 @@ export const GET: RequestHandler = (event) => api('av.subtitle-providers', async
         detail: 'ffprobe indexes audio and subtitle streams; Aby extracts a selected subtitle to WebVTT on demand.'
       },
       {
+        id: 'sidecar', label: 'NEIGHBORING .SRT', state: 'READY',
+        detail: 'Matching .srt files beside the movie are indexed, playable, and copied with the video during EXECUTE.'
+      },
+      {
         id: 'opensubtitles', label: 'OPENSUBTITLES', state: config.openSubtitlesConfigured ? 'READY' : 'NEEDS API KEY',
         detail: config.openSubtitlesConfigured ? 'API key configured. External discovery can use canonical IMDb metadata.' : 'Set OPENSUBTITLES_API_KEY in the production environment.'
       },

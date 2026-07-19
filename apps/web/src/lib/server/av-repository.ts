@@ -5,7 +5,7 @@ import { readConfig } from './config';
 import { AbyError } from './errors';
 
 type TechnicalMetadata = AvCatalogItem['technicalMetadata'];
-type OperationPatch = Partial<Pick<StorageOperation, 'state' | 'transferredBytes' | 'speedBytesPerSecond' | 'etaSeconds' | 'beaconAt' | 'error' | 'startedAt' | 'finishedAt'>>;
+type OperationPatch = Partial<Pick<StorageOperation, 'state' | 'sizeBytes' | 'transferredBytes' | 'speedBytesPerSecond' | 'etaSeconds' | 'beaconAt' | 'error' | 'startedAt' | 'finishedAt'>>;
 
 export function postgresJson(value: unknown) {
   return JSON.stringify(value);
@@ -16,6 +16,7 @@ export interface AvRepository {
   listItems(ownerId: string): Promise<AvCatalogItem[]>;
   getItem(ownerId: string, id: string): Promise<AvCatalogItem | null>;
   updateItemMetadata(ownerId: string, id: string, patch: { title?: string; director?: string; summary?: string }): Promise<AvCatalogItem>;
+  updateItemTechnicalMetadata(ownerId: string, id: string, technicalMetadata: TechnicalMetadata): Promise<AvCatalogItem>;
   setItemState(ownerId: string, id: string, state: AvCatalogItem['state']): Promise<void>;
   listOperations(ownerId: string): Promise<StorageOperation[]>;
   getOperation(ownerId: string, id: string): Promise<StorageOperation | null>;
@@ -40,7 +41,7 @@ export class MemoryAvRepository implements AvRepository {
     const item: AvCatalogItem = { id: randomUUID(), ownerId, provider: 'wasabi', bucket, ...input, technicalMetadata, state: 'queued', createdAt: timestamp, updatedAt: timestamp };
     const operation: StorageOperation = {
       id: randomUUID(), ownerId, avItemId: item.id, operation: 'copy', sourceObjectKey: input.sourceObjectKey,
-      destinationObjectKey: input.destinationObjectKey, state: 'pending', sizeBytes: technicalMetadata.sizeBytes,
+      destinationObjectKey: input.destinationObjectKey, state: 'pending', sizeBytes: technicalMetadata.sizeBytes + (technicalMetadata.sidecarSubtitles ?? []).reduce((total, subtitle) => total + subtitle.sizeBytes, 0),
       transferredBytes: 0, speedBytesPerSecond: 0, createdAt: timestamp
     };
     this.#items.set(item.id, structuredClone(item));
@@ -54,6 +55,13 @@ export class MemoryAvRepository implements AvRepository {
     const item = this.#items.get(id);
     if (!item || item.ownerId !== ownerId) throw new AbyError('av_item_not_found', 'AV item not found', 404);
     const updated = { ...item, ...patch, updatedAt: now() };
+    this.#items.set(id, updated);
+    return structuredClone(updated);
+  }
+  async updateItemTechnicalMetadata(ownerId: string, id: string, technicalMetadata: TechnicalMetadata) {
+    const item = this.#items.get(id);
+    if (!item || item.ownerId !== ownerId) throw new AbyError('av_item_not_found', 'AV item not found', 404);
+    const updated = { ...item, technicalMetadata, updatedAt: now() };
     this.#items.set(id, updated);
     return structuredClone(updated);
   }
@@ -147,7 +155,7 @@ export class PostgresAvRepository implements AvRepository {
         `INSERT INTO aby.storage_operations
          (id,owner_id,av_item_id,source_object_key,destination_object_key,size_bytes)
          VALUES($1,$2,$3,$4,$5,$6) RETURNING *`,
-        [operationId, ownerId, itemId, input.sourceObjectKey, input.destinationObjectKey, technicalMetadata.sizeBytes]
+        [operationId, ownerId, itemId, input.sourceObjectKey, input.destinationObjectKey, technicalMetadata.sizeBytes + (technicalMetadata.sidecarSubtitles ?? []).reduce((total, subtitle) => total + subtitle.sizeBytes, 0)]
       );
       await client.query('COMMIT');
       return { item: mapItem(itemResult.rows[0]), operation: mapOperation(operationResult.rows[0]) };
@@ -168,6 +176,14 @@ export class PostgresAvRepository implements AvRepository {
     if (!result.rows[0]) throw new AbyError('av_item_not_found', 'AV item not found', 404);
     return mapItem(result.rows[0]);
   }
+  async updateItemTechnicalMetadata(ownerId: string, id: string, technicalMetadata: TechnicalMetadata) {
+    const result = await this.#pool.query(
+      'UPDATE aby.av_catalog_items SET technical_metadata=$1,updated_at=now() WHERE id=$2 AND owner_id=$3 RETURNING *',
+      [postgresJson(technicalMetadata), id, ownerId]
+    );
+    if (!result.rows[0]) throw new AbyError('av_item_not_found', 'AV item not found', 404);
+    return mapItem(result.rows[0]);
+  }
   async setItemState(ownerId: string, id: string, state: AvCatalogItem['state']) {
     const result = await this.#pool.query('UPDATE aby.av_catalog_items SET state=$1,updated_at=now() WHERE id=$2 AND owner_id=$3 RETURNING id', [state, id, ownerId]);
     if (!result.rows[0]) throw new AbyError('av_item_not_found', 'AV item not found', 404);
@@ -179,8 +195,8 @@ export class PostgresAvRepository implements AvRepository {
     if (!current) throw new AbyError('operation_not_found', 'Storage operation not found', 404);
     const next = { ...current, ...patch };
     const result = await this.#pool.query(
-      `UPDATE aby.storage_operations SET state=$1,transferred_bytes=$2,speed_bytes_per_second=$3,eta_seconds=$4,beacon_at=$5,error=$6,started_at=$7,finished_at=$8 WHERE id=$9 AND owner_id=$10 RETURNING *`,
-      [next.state, next.transferredBytes, next.speedBytesPerSecond, next.etaSeconds ?? null, next.beaconAt ?? null, next.error ?? null, next.startedAt ?? null, next.finishedAt ?? null, id, ownerId]
+      `UPDATE aby.storage_operations SET state=$1,size_bytes=$2,transferred_bytes=$3,speed_bytes_per_second=$4,eta_seconds=$5,beacon_at=$6,error=$7,started_at=$8,finished_at=$9 WHERE id=$10 AND owner_id=$11 RETURNING *`,
+      [next.state, next.sizeBytes, next.transferredBytes, next.speedBytesPerSecond, next.etaSeconds ?? null, next.beaconAt ?? null, next.error ?? null, next.startedAt ?? null, next.finishedAt ?? null, id, ownerId]
     );
     return mapOperation(result.rows[0]);
   }

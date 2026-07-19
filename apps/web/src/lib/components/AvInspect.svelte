@@ -9,6 +9,7 @@
   type Inspection = {
     id: string; sourceObjectKey: string; originalFilename: string; playbackUrl: string; probeState: 'ok' | 'partial'; inspectedAt: string;
     technicalMetadata: { sizeBytes: number; contentType?: string; durationMs?: number; videoCodec?: string; audioCodec?: string; width?: number; height?: number };
+    sidecarSubtitles: Array<{sourceObjectKey:string;language?:string;title?:string;forced?:boolean;hearingImpaired?:boolean;sizeBytes:number}>;
     embeddedMetadata: { title: string; originalTitle?: string; year?: number; director?: string; country?: string; languages: string[]; summary?: string; tags: Record<string,string> };
   };
   type Service = 'tmdb' | 'wikidata' | 'internet-archive';
@@ -36,13 +37,14 @@
   let imdbId = $state(''); let tmdbId = $state(''); let wikidataId = $state(''); let internetArchiveId = $state('');
   let authorityQuery = $state<Record<Service,string>>({ tmdb:'', wikidata:'', 'internet-archive':'' });
   let subtitleProviders = $state<Array<{id:string;label:string;state:string;detail:string}>>([]);
+  let subtitleLanguagesText = $state('en, es'); let includeHearingImpaired = $state(true);
   let metadataSources = $state<Array<{ authority: string; externalId: string; canonicalUrl: string; fetchedAt: string }>>([]);
   let treeStrategy = $state<AvTreeStrategy>('author'); let treeValue = $state('');
   let busy = $state(false); let status = $state('Choose an audiovisual source. No bytes move during inspection or commit.');
   let searchTimer: ReturnType<typeof setTimeout> | undefined; let operationTimer: ReturnType<typeof setInterval> | undefined;
 
   onMount(() => {
-    if (canInspect) { void loadOperations(); void loadSubtitleProviders(); }
+    if (canInspect) { void loadOperations(); void loadSubtitleProviders(); void loadSubtitleSettings(); }
     operationTimer = setInterval(() => { if (operations.some((operation) => operation.state === 'running')) void loadOperations(); }, 2_000);
     return () => clearInterval(operationTimer);
   });
@@ -63,6 +65,9 @@
     const body = await jsonRequest(`/api/ingest/sources?${params}`);
     sources = body.sources ?? []; sourceTotal = body.total ?? 0;
   }
+
+  async function loadSubtitleSettings() { try { const body=await jsonRequest('/api/av/subtitle-settings'); subtitleLanguagesText=(body.settings?.languages??['en','es']).join(', '); includeHearingImpaired=body.settings?.includeHearingImpaired!==false; } catch {/* defaults remain */} }
+  async function saveSubtitleSettings() { try { const languages=splitValues(subtitleLanguagesText).map((value)=>value.toLocaleLowerCase()); const body=await jsonRequest('/api/av/subtitle-settings',{method:'PATCH',headers:{'content-type':'application/json'},body:JSON.stringify({languages,includeHearingImpaired})}); subtitleLanguagesText=body.settings.languages.join(', '); status=`OpenSubtitles languages saved: ${body.settings.languages.join(' · ')}`; } catch(error){status=error instanceof Error?error.message:'Subtitle settings could not be saved';} }
 
   function queueSearch() { clearTimeout(searchTimer); searchTimer = setTimeout(() => void loadSources(), 250); }
   async function toggleSources() { sourcesOpen = !sourcesOpen; if (sourcesOpen && sources.length === 0) await loadSources(); }
@@ -185,7 +190,7 @@
         {#if inspection}
           <!-- svelte-ignore a11y_media_has_caption -->
           <video src={inspection.playbackUrl} controls preload="metadata"></video>
-          <dl><div><dt>SOURCE</dt><dd>{inspection.sourceObjectKey}</dd></div><div><dt>PROBE</dt><dd>{inspection.probeState}</dd></div><div><dt>SIZE</dt><dd>{formatBytes(inspection.technicalMetadata.sizeBytes)}</dd></div><div><dt>DURATION</dt><dd>{formatDuration(inspection.technicalMetadata.durationMs)}</dd></div><div><dt>VIDEO</dt><dd>{inspection.technicalMetadata.videoCodec ?? '—'} · {inspection.technicalMetadata.width ?? '—'}×{inspection.technicalMetadata.height ?? '—'}</dd></div><div><dt>AUDIO</dt><dd>{inspection.technicalMetadata.audioCodec ?? '—'}</dd></div></dl>
+          <dl><div><dt>SOURCE</dt><dd>{inspection.sourceObjectKey}</dd></div><div><dt>PROBE</dt><dd>{inspection.probeState}</dd></div><div><dt>SIZE</dt><dd>{formatBytes(inspection.technicalMetadata.sizeBytes)}</dd></div><div><dt>DURATION</dt><dd>{formatDuration(inspection.technicalMetadata.durationMs)}</dd></div><div><dt>VIDEO</dt><dd>{inspection.technicalMetadata.videoCodec ?? '—'} · {inspection.technicalMetadata.width ?? '—'}×{inspection.technicalMetadata.height ?? '—'}</dd></div><div><dt>AUDIO</dt><dd>{inspection.technicalMetadata.audioCodec ?? '—'}</dd></div><div><dt>SIDECAR .SRT</dt><dd>{inspection.sidecarSubtitles.length ? inspection.sidecarSubtitles.map((subtitle)=>subtitle.language??subtitle.title).join(' · ') : 'NONE'}</dd></div></dl>
           {#if Object.keys(inspection.embeddedMetadata.tags).length}<details><summary>EMBEDDED TAGS · {Object.keys(inspection.embeddedMetadata.tags).length}</summary><pre>{JSON.stringify(inspection.embeddedMetadata.tags,null,2)}</pre></details>{/if}
         {:else}<p class="empty">Choose one source. Aby uses HEAD plus bounded ffprobe against a temporary URL; it does not download the complete film into the web process.</p>{/if}
       </article>
@@ -228,7 +233,7 @@
       </div>{:else}<p class="empty">Canonical fields unlock after source inspection.</p>{/if}
     </section>
 
-    <section class="subtitle-config"><header><div><span>TEXT</span><h2>Subtitle providers</h2></div><small>Embedded tracks come from the container. External providers remain explicit.</small></header><div>{#each subtitleProviders as provider (provider.id)}<article><strong>{provider.label}</strong><span class:ready={provider.state==='READY'}>{provider.state}</span><p>{provider.detail}</p></article>{/each}</div></section>
+    <section class="subtitle-config"><header><div><span>TEXT</span><h2>Subtitle providers</h2></div><small>VIEW combines embedded tracks, neighboring .srt files and OpenSubtitles.</small></header><div>{#each subtitleProviders as provider (provider.id)}<article><strong>{provider.label}</strong><span class:ready={provider.state==='READY'}>{provider.state}</span><p>{provider.detail}</p></article>{/each}</div><form onsubmit={(event)=>{event.preventDefault();void saveSubtitleSettings();}}><label>OPENSUBTITLES LANGUAGES · ISO CODES<input bind:value={subtitleLanguagesText} type="text" placeholder="en, es, fr, de" /></label><label class="check"><input type="checkbox" bind:checked={includeHearingImpaired}/> INCLUDE SDH / HEARING IMPAIRED</label><button type="submit">SAVE LANGUAGE FILTER</button></form></section>
 
     <section class="operation-thread"><header><div><span>STORAGE</span><h2>Deferred operation thread</h2></div><small>origin · destination · state · size · progress · speed · ETA</small></header>{#if operations.length===0}<p class="empty">No AV storage operations.</p>{/if}{#each operations as operation (operation.id)}<article><div><strong>{operation.sourceObjectKey}</strong><span>→ {operation.destinationObjectKey}</span></div><div class="metrics"><span>{operation.state}</span><span>{formatBytes(operation.sizeBytes)}</span><span>{operationProgress(operation).toFixed(1)}%</span><span>{formatBytes(operation.speedBytesPerSecond)}/s</span><span>ETA {operation.etaSeconds ?? '—'}</span></div><i><b style={`width:${operationProgress(operation)}%`}></b></i><footer><small>{operation.beaconAt ? `beacon ${new Date(operation.beaconAt).toLocaleTimeString()}` : 'not started'}</small><button onclick={() => execute(operation)} disabled={operation.state==='running'||operation.state==='succeeded'}>EXECUTE</button></footer></article>{/each}</section>
   {/if}
@@ -240,4 +245,5 @@
   .authority-id{padding:0 12px 12px;border-top:1px solid #282b26}.authority-id label{margin:10px 0 5px;display:grid;gap:5px;color:var(--muted);font:9.2px ui-monospace,monospace}.authority-id input{width:100%;box-sizing:border-box;margin:0;padding:9px;border:1px solid var(--line);background:#090a09;color:#fff;font:11.5px ui-monospace,monospace}.authority-id small{color:var(--muted);font:9.2px ui-monospace,monospace}.ids{grid-template-columns:minmax(180px,320px) 1fr;align-items:end}.ids p{margin:0;padding:8px 0;color:var(--muted);font:10.35px/1.45 ui-monospace,monospace}
   .credit-editor{border:1px solid var(--line)}.credit-editor>header{padding:8px 10px;display:flex;justify-content:space-between;align-items:center;background:#111310}.credit-editor>header strong{color:var(--muted);font:9.2px ui-monospace,monospace}.credit-editor button{border:1px solid var(--line);background:transparent;color:var(--signal)}.credit-editor>div{padding:6px;display:grid;grid-template-columns:1.2fr .8fr 1fr 32px;gap:6px;border-top:1px solid var(--line)}.credit-editor>div input,.credit-editor>div select{padding:8px}.subtitle-config{margin-top:18px;background:var(--surface)}.subtitle-config>header{padding:18px;display:flex;justify-content:space-between;align-items:baseline;border-bottom:1px solid var(--line)}.subtitle-config>header>div{display:flex;gap:14px;align-items:baseline}.subtitle-config>header small{color:var(--muted);font:9.2px ui-monospace,monospace}.subtitle-config>div{display:grid;grid-template-columns:repeat(3,1fr)}.subtitle-config article{padding:14px;border-right:1px solid var(--line)}.subtitle-config article span{float:right;color:var(--muted);font:9.2px ui-monospace,monospace}.subtitle-config article span.ready{color:var(--signal)}.subtitle-config article p{margin:8px 0 0;color:var(--muted);font:10.35px/1.4 ui-monospace,monospace}@media(max-width:700px){.credit-editor>div,.subtitle-config>div{grid-template-columns:1fr}.credit-editor>div button{min-height:34px}}
   .reference-import{display:grid;grid-template-columns:1fr auto;gap:8px;align-items:end}.reference-import button{min-height:36px;border:1px solid var(--signal);background:transparent;color:var(--signal);font:9.2px ui-monospace,monospace}
+  .subtitle-config>form{padding:14px;display:grid;grid-template-columns:minmax(260px,1fr) auto auto;gap:12px;align-items:end;border-top:1px solid var(--line)}.subtitle-config>form label{display:grid;gap:6px;color:var(--muted);font:9.2px ui-monospace,monospace}.subtitle-config>form input[type="text"]{min-height:38px;padding:0 10px;border:1px solid var(--line);background:#090a09;color:#fff}.subtitle-config>form .check{display:flex;min-height:38px;align-items:center;gap:8px}.subtitle-config>form button{min-height:38px;padding:0 14px;border:1px solid var(--signal);background:transparent;color:var(--signal);font:9.2px ui-monospace,monospace}@media(max-width:700px){.subtitle-config>form{grid-template-columns:1fr}}
 </style>

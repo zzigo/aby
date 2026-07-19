@@ -376,6 +376,12 @@ export const ConversionSettingsSchema = z.object({
 });
 export type ConversionSettings = z.infer<typeof ConversionSettingsSchema>;
 
+export const AvSubtitleSettingsSchema = z.object({
+  languages: z.array(z.string().trim().toLowerCase().regex(/^[a-z]{2,3}(?:-[a-z0-9]{2,8})?$/)).min(1).max(12).default(['en', 'es']),
+  includeHearingImpaired: z.boolean().default(true)
+});
+export type AvSubtitleSettings = z.infer<typeof AvSubtitleSettingsSchema>;
+
 export const TrackEditSchema = z.object({
   workTitle: z.string().trim().min(1).max(500),
   albumTitle: z.string().trim().max(500).nullable().optional(),
@@ -517,7 +523,16 @@ export const AvCatalogItemSchema = AvCatalogCreateSchema.extend({
     width: z.number().int().positive().optional(),
     height: z.number().int().positive().optional(),
     audioTracks: TechnicalMetadataSchema.shape.audioTracks,
-    subtitleTracks: TechnicalMetadataSchema.shape.subtitleTracks
+    subtitleTracks: TechnicalMetadataSchema.shape.subtitleTracks,
+    sidecarSubtitles: z.array(z.object({
+      sourceObjectKey: z.string().min(1),
+      destinationObjectKey: z.string().min(1),
+      language: z.string().optional(),
+      title: z.string().optional(),
+      forced: z.boolean().optional(),
+      hearingImpaired: z.boolean().optional(),
+      sizeBytes: z.number().int().nonnegative()
+    })).optional()
   }),
   state: z.enum(['staged', 'queued', 'copying', 'available', 'failed']),
   createdAt: z.string().datetime(),
