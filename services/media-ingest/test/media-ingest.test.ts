@@ -26,4 +26,17 @@ describe('ffprobe parsing', () => {
     expect(result.metadata.sampleRate).toBe(48000);
     expect(result.metadata.tags.title).toBe('Candidate title');
   });
+
+  test('retains selectable audio and subtitle stream descriptors', () => {
+    const result = parseFfprobe({
+      format: { format_name: 'matroska', duration: '90' },
+      streams: [
+        { index: 0, codec_type: 'video', codec_name: 'h264', width: 1920, height: 1080 },
+        { index: 1, codec_type: 'audio', codec_name: 'aac', channels: 2, tags: { language: 'jpn', title: 'Original' } },
+        { index: 2, codec_type: 'subtitle', codec_name: 'ass', tags: { language: 'eng' }, disposition: { forced: 1 } }
+      ]
+    });
+    expect(result.metadata.audioTracks).toEqual([{ index: 1, codec: 'aac', language: 'jpn', title: 'Original', channels: 2 }]);
+    expect(result.metadata.subtitleTracks).toEqual([{ index: 2, codec: 'ass', language: 'eng', forced: true }]);
+  });
 });

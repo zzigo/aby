@@ -30,9 +30,9 @@ export const GET: RequestHandler = (event) => api('workspace.list', async () => 
       const operation = operationByItem.get(item.id);
       return {
         id: item.id, type: 'item', media: 'video', title: item.title, work: item.originalTitle ?? item.title,
-        creator: item.director ?? item.entity ?? '', year: item.year ?? '', state: item.state,
+        creator: item.director ?? item.composer ?? item.entity ?? '', year: item.year ?? '', state: item.state,
         source: item.sourceObjectKey, destination: item.destinationObjectKey, sizeBytes: item.technicalMetadata.sizeBytes,
-        durationMs: item.technicalMetadata.durationMs ?? 0, tags: [item.kind, item.treeStrategy, item.treeValue],
+        durationMs: item.technicalMetadata.durationMs ?? 0, tags: [...item.tags,item.kind,item.treeStrategy,item.treeValue],
         externalIds: item.externalIds, createdAt: item.createdAt,
         operation: operation ? { id: operation.id, state: operation.state, transferredBytes: operation.transferredBytes, speedBytesPerSecond: operation.speedBytesPerSecond, etaSeconds: operation.etaSeconds, beaconAt: operation.beaconAt } : null
       };

@@ -39,6 +39,21 @@ export const TechnicalMetadataSchema = z.object({
   videoCodec: z.string().optional(),
   width: z.number().int().positive().optional(),
   height: z.number().int().positive().optional(),
+  audioTracks: z.array(z.object({
+    index: z.number().int().nonnegative(),
+    codec: z.string().optional(),
+    language: z.string().optional(),
+    title: z.string().optional(),
+    channels: z.number().int().positive().optional()
+  })).optional(),
+  subtitleTracks: z.array(z.object({
+    index: z.number().int().nonnegative(),
+    codec: z.string().optional(),
+    language: z.string().optional(),
+    title: z.string().optional(),
+    forced: z.boolean().optional(),
+    hearingImpaired: z.boolean().optional()
+  })).optional(),
   tags: z.record(z.string(), z.string()).default({})
 });
 export type TechnicalMetadata = z.infer<typeof TechnicalMetadataSchema>;
@@ -463,11 +478,15 @@ export const AvCatalogCreateSchema = z.object({
   kind: z.enum(['film', 'episode', 'video', 'personal', 'archive']).default('film'),
   year: z.number().int().min(1800).max(2200).optional(),
   director: z.string().trim().max(500).optional(),
+  composer: z.string().trim().max(500).optional(),
   entity: z.string().trim().max(500).optional(),
   saga: z.string().trim().max(500).optional(),
   country: z.string().trim().max(200).optional(),
+  countries: z.array(z.string().trim().min(1).max(100)).max(100).default([]),
   languages: z.array(z.string().trim().min(1).max(40)).max(40).default([]),
+  tags: z.array(z.string().trim().min(1).max(100)).max(250).default([]),
   summary: z.string().trim().max(50_000).optional(),
+  editionNotes: z.string().trim().max(50_000).optional(),
   posterUrl: z.string().url().optional(),
   credits: z.array(AvCreditSchema).max(2_000).default([]),
   externalIds: z.record(z.string(), z.string()).default({}),
@@ -496,7 +515,9 @@ export const AvCatalogItemSchema = AvCatalogCreateSchema.extend({
     videoCodec: z.string().optional(),
     audioCodec: z.string().optional(),
     width: z.number().int().positive().optional(),
-    height: z.number().int().positive().optional()
+    height: z.number().int().positive().optional(),
+    audioTracks: TechnicalMetadataSchema.shape.audioTracks,
+    subtitleTracks: TechnicalMetadataSchema.shape.subtitleTracks
   }),
   state: z.enum(['staged', 'queued', 'copying', 'available', 'failed']),
   createdAt: z.string().datetime(),

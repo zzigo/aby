@@ -25,6 +25,10 @@ export async function api<T>(operation: string, callback: (traceId: string) => P
   const traceId = randomUUID();
   try {
     const body = await callback(traceId);
+    if (body instanceof Response) {
+      const headers=new Headers(body.headers); headers.set('x-aby-trace-id',traceId);
+      return new Response(body.body,{status:body.status,statusText:body.statusText,headers});
+    }
     return Response.json(body, { headers: { 'x-aby-trace-id': traceId } });
   } catch (error) {
     const known = error instanceof AbyError;

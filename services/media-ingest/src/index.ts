@@ -7,6 +7,7 @@ import type { TechnicalMetadata } from '@zztt/aby-domain';
 const execFileAsync = promisify(execFile);
 
 interface FfprobeStream {
+  index?: number;
   codec_type?: string;
   codec_name?: string;
   sample_rate?: string;
@@ -14,6 +15,8 @@ interface FfprobeStream {
   channel_layout?: string;
   width?: number;
   height?: number;
+  tags?: Record<string, unknown>;
+  disposition?: { forced?: number; hearing_impaired?: number };
 }
 
 interface FfprobeDocument {
@@ -45,6 +48,21 @@ export function parseFfprobe(document: FfprobeDocument): ProbeResult {
   const video = document.streams?.find((stream) => stream.codec_type === 'video');
   const durationMs = Math.max(0, Math.round(Number(format.duration ?? 0) * 1000));
   const tags = Object.fromEntries(Object.entries(format.tags ?? {}).map(([key, value]) => [key, String(value)]));
+  const audioTracks = (document.streams ?? []).filter((stream) => stream.codec_type === 'audio').map((stream, position) => ({
+    index: stream.index ?? position,
+    ...(stream.codec_name ? { codec: stream.codec_name } : {}),
+    ...(stream.tags?.language ? { language: String(stream.tags.language) } : {}),
+    ...(stream.tags?.title ? { title: String(stream.tags.title) } : {}),
+    ...(positiveInteger(stream.channels) ? { channels: positiveInteger(stream.channels) } : {})
+  }));
+  const subtitleTracks = (document.streams ?? []).filter((stream) => stream.codec_type === 'subtitle').map((stream, position) => ({
+    index: stream.index ?? position,
+    ...(stream.codec_name ? { codec: stream.codec_name } : {}),
+    ...(stream.tags?.language ? { language: String(stream.tags.language) } : {}),
+    ...(stream.tags?.title ? { title: String(stream.tags.title) } : {}),
+    ...(stream.disposition?.forced ? { forced: true } : {}),
+    ...(stream.disposition?.hearing_impaired ? { hearingImpaired: true } : {})
+  }));
   return {
     toolVersion: document.program_version?.version ?? 'unknown',
     metadata: {
@@ -60,6 +78,8 @@ export function parseFfprobe(document: FfprobeDocument): ProbeResult {
       ...(video?.codec_name ? { videoCodec: video.codec_name } : {}),
       ...(positiveInteger(video?.width) ? { width: positiveInteger(video?.width) } : {}),
       ...(positiveInteger(video?.height) ? { height: positiveInteger(video?.height) } : {}),
+      ...(audioTracks.length ? { audioTracks } : {}),
+      ...(subtitleTracks.length ? { subtitleTracks } : {}),
       tags
     }
   };
@@ -90,4 +110,3 @@ export async function inspectLocalAsset(path: string, options: { binary?: string
   const [checksumSha256, probe] = await Promise.all([sha256File(path), ffprobeFile(path, options)]);
   return { checksumSha256, ...probe };
 }
-

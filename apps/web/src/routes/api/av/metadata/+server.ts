@@ -9,8 +9,11 @@ export const GET: RequestHandler = (event) => api('av.metadata.search', async ()
   const service = event.url.searchParams.get('service');
   const requested = service === 'tmdb' || service === 'wikidata' || service === 'internet-archive' ? service as AvMetadataService : undefined;
   const id = event.url.searchParams.get('id')?.trim();
-  if (requested && id) return lookupAvMetadataById(requested, id);
-  const query = event.url.searchParams.get('q')?.trim();
+  const isCanonicalId = requested === 'tmdb' ? /^\d+$/.test(id ?? '')
+    : requested === 'wikidata' ? /^Q\d+$/i.test(id ?? '')
+      : requested === 'internet-archive' ? Boolean(id && !/\s/.test(id)) : false;
+  if (requested && id && isCanonicalId) return lookupAvMetadataById(requested, id);
+  const query = event.url.searchParams.get('q')?.trim() || id;
   if (!query) return { candidates: [], services: {} };
   const parsedYear = Number(event.url.searchParams.get('year'));
   return searchAvMetadata(query, Number.isInteger(parsedYear) && parsedYear >= 1800 ? parsedYear : undefined, requested);

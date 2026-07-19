@@ -13,7 +13,7 @@ function slug(value: string): string {
 function titleFolder(title: string, year?: number): string {
   const clean = title.normalize('NFC').replace(/\p{Cc}/gu, '').replaceAll('/', '／').trim();
   if (!clean) throw new AbyError('invalid_av_title', 'AV title cannot be empty', 400);
-  return year ? `${year} — ${clean}` : clean;
+  return year ? `${year}-${clean}` : clean;
 }
 
 export function authorSurname(value: string): string {
@@ -43,8 +43,6 @@ export function proposeAvDestination(input: {
     ? [decade, value]
     : input.strategy === 'decade'
       ? [value]
-      : input.strategy === 'custom'
-        ? [value]
-        : [input.strategy, value];
+      : [value];
   return normalizeObjectKey(['aby', 'mov', ...hierarchy, titleFolder(input.title, input.year), filename].join('/'));
 }

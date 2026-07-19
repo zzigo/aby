@@ -12,6 +12,7 @@
     "album:relocate": "bun scripts/relocate-album.ts",
     "ingest:preview": "bun scripts/preview-wasabi.ts",
     "text:repair": "bun scripts/repair-catalog-text.ts",
+    "av:repair-destinations": "bun scripts/repair-av-destinations.ts",
     "spectrogram:generate": "bun scripts/generate-spectrogram.ts"
   },
   "dependencies": {

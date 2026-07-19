@@ -14,7 +14,11 @@ function tmdbCandidate(entry: Record<string, any>): AvMetadataCandidate {
     ...(entry.poster_path ? { posterUrl: `https://image.tmdb.org/t/p/w780${String(entry.poster_path)}` } : {}),
     canonicalUrl: `https://www.themoviedb.org/movie/${tmdbId}`,
     externalIds: { tmdb: tmdbId, ...(entry.external_ids?.imdb_id ? { imdb: String(entry.external_ids.imdb_id) } : {}) },
-    metadata: { popularity: entry.popularity, originalLanguage: entry.original_language, backdropPath: entry.backdrop_path }
+    metadata: {
+      popularity: entry.popularity, originalLanguage: entry.original_language, backdropPath: entry.backdrop_path,
+      genres: (entry.genres ?? []).map((genre: Record<string, unknown>) => String(genre.name)).filter(Boolean),
+      countries: (entry.production_countries ?? []).map((country: Record<string, unknown>) => String(country.iso_3166_1 || country.name)).filter(Boolean)
+    }
   };
 }
 
@@ -38,7 +42,23 @@ async function tmdbCandidates(query: string, year?: number): Promise<AvMetadataC
   if (year) url.searchParams.set('primary_release_year', String(year));
   const response = await fetch(url, { headers: configureTmdbRequest(url, config), signal: timeout() });
   if (!response.ok) throw new Error(`TMDB responded ${response.status}`);
-  const body = await response.json() as { results?: Array<Record<string, unknown>> };
+  let body = await response.json() as { results?: Array<Record<string, unknown>> };
+  if (!body.results?.length && year) {
+    url.searchParams.delete('primary_release_year');
+    const fallback = await fetch(url, { headers: configureTmdbRequest(url, config), signal: timeout() });
+    if (!fallback.ok) throw new Error(`TMDB fallback responded ${fallback.status}`);
+    body = await fallback.json() as typeof body;
+  }
+  if (!body.results?.length) {
+    const correctedTitle=(await wikidataCandidates(query))[0]?.title;
+    if(correctedTitle&&correctedTitle.toLocaleLowerCase()!==query.toLocaleLowerCase()) {
+      url.searchParams.set('query',correctedTitle);
+      url.searchParams.delete('primary_release_year');
+      const corrected=await fetch(url,{headers:configureTmdbRequest(url,config),signal:timeout()});
+      if(!corrected.ok) throw new Error(`TMDB corrected-title fallback responded ${corrected.status}`);
+      body=await corrected.json() as typeof body;
+    }
+  }
   return (body.results ?? []).slice(0, 8).map(tmdbCandidate);
 }
 
@@ -53,6 +73,15 @@ async function wikidataCandidates(query: string): Promise<AvMetadataCandidate[]>
     response = await fetch(url, { headers: { 'user-agent': 'Aby/0.1 (https://aby.zztt.org)' }, signal: timeout() });
     if (!response.ok) throw new Error(`Wikidata fallback responded ${response.status}`);
     body = await response.json() as typeof body;
+  }
+  if (!body.search?.length) {
+    const fulltext = new URL('https://www.wikidata.org/w/api.php');
+    fulltext.search = new URLSearchParams({ action: 'query', list: 'search', srsearch: `${query} film`, srnamespace: '0', srlimit: '8', format: 'json', origin: '*' }).toString();
+    const fallback = await fetch(fulltext, { headers: { 'user-agent': 'Aby/0.1 (https://aby.zztt.org)' }, signal: timeout() });
+    if (!fallback.ok) throw new Error(`Wikidata full-text fallback responded ${fallback.status}`);
+    const fulltextBody = await fallback.json() as { query?: { search?: Array<{ title: string }> } };
+    const direct = await Promise.all((fulltextBody.query?.search ?? []).filter((entry) => /^Q\d+$/.test(entry.title)).map((entry) => wikidataCandidateById(entry.title)));
+    return direct.filter((candidate): candidate is AvMetadataCandidate => Boolean(candidate));
   }
   return (body.search ?? []).map((entry) => ({
     authority: 'wikidata', externalId: entry.id, title: entry.label,
@@ -94,7 +123,7 @@ async function wikidataCandidateById(id: string): Promise<AvMetadataCandidate | 
   if (!/^Q\d+$/i.test(id)) return null;
   const qid = id.toUpperCase();
   const url = new URL('https://www.wikidata.org/w/api.php');
-  url.search = new URLSearchParams({ action: 'wbgetentities', ids: qid, languages: 'en', props: 'labels|descriptions|claims', format: 'json', origin: '*' }).toString();
+  url.search = new URLSearchParams({ action: 'wbgetentities', ids: qid, languages: 'en|fr|es', props: 'labels|descriptions|claims', format: 'json', origin: '*' }).toString();
   const response = await fetch(url, { headers: { 'user-agent': 'Aby/0.1 (https://aby.zztt.org)' }, signal: timeout() });
   if (!response.ok) throw new Error(`Wikidata entity responded ${response.status}`);
   const body = await response.json() as { entities?: Record<string, any> };
@@ -106,7 +135,7 @@ async function wikidataCandidateById(id: string): Promise<AvMetadataCandidate | 
   const imdb = claimValue('P345') as string | undefined;
   const tmdb = claimValue('P4947') as string | undefined;
   return {
-    authority: 'wikidata', externalId: qid, title: entity.labels?.en?.value || qid,
+    authority: 'wikidata', externalId: qid, title: entity.labels?.en?.value || entity.labels?.fr?.value || entity.labels?.es?.value || qid,
     ...(publication ? { year: Number(publication.slice(1, 5)) } : {}),
     ...(entity.descriptions?.en?.value ? { summary: String(entity.descriptions.en.value) } : {}),
     ...(image ? { posterUrl: `https://commons.wikimedia.org/wiki/Special:Redirect/file/${encodeURIComponent(image)}?width=780` } : {}),
@@ -167,13 +196,14 @@ export async function searchAvMetadata(query: string, year?: number, requested?:
 
 export async function getTmdbMovieDetails(id: string) {
   const config = readConfig();
-  if (!config.tmdbConfigured) return null;
+  if (!config.tmdbConfigured || !/^\d+$/.test(id)) return null;
   const url = new URL(`https://api.themoviedb.org/3/movie/${encodeURIComponent(id)}`);
   url.searchParams.set('append_to_response', 'credits,external_ids');
   const response = await fetch(url, { headers: configureTmdbRequest(url, config), signal: timeout() });
   if (!response.ok) throw new Error(`TMDB details responded ${response.status}`);
   const body = await response.json() as Record<string, any>;
   const director = body.credits?.crew?.find((person: Record<string, unknown>) => person.job === 'Director');
+  const composer = body.credits?.crew?.find((person: Record<string, unknown>) => ['Original Music Composer', 'Music'].includes(String(person.job)));
   const credits = [
     ...(body.credits?.crew ?? []).slice(0, 500).map((person: Record<string, unknown>) => ({
       name: String(person.name), role: String(person.job || person.department || 'Crew'), externalIds: { tmdbPerson: String(person.id) }
@@ -184,8 +214,10 @@ export async function getTmdbMovieDetails(id: string) {
   ];
   return {
     candidate: tmdbCandidate(body),
-    director: director?.name ? String(director.name) : '', credits,
+    director: director?.name ? String(director.name) : '', composer: composer?.name ? String(composer.name) : '', credits,
     country: body.production_countries?.[0]?.iso_3166_1 ? String(body.production_countries[0].iso_3166_1) : '',
+    countries: (body.production_countries ?? []).map((country: Record<string, unknown>) => String(country.iso_3166_1 || country.name)).filter(Boolean),
+    tags: (body.genres ?? []).map((genre: Record<string, unknown>) => String(genre.name)).filter(Boolean),
     languages: (body.spoken_languages ?? []).map((language: Record<string, unknown>) => String(language.iso_639_1 || language.english_name)).filter(Boolean),
     externalIds: {
       tmdb: String(body.id), ...(body.external_ids?.imdb_id ? { imdb: String(body.external_ids.imdb_id) } : {})

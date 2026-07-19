@@ -89,9 +89,12 @@ function mapItem(row: any): AvCatalogItem {
     sourceObjectKey: row.source_object_key, destinationObjectKey: row.destination_object_key,
     title: row.title, ...(row.original_title ? { originalTitle: row.original_title } : {}), kind: row.kind,
     ...(row.year ? { year: row.year } : {}), ...(row.director ? { director: row.director } : {}),
+    ...(row.composer ? { composer: row.composer } : {}),
     ...(row.entity ? { entity: row.entity } : {}), ...(row.saga ? { saga: row.saga } : {}),
-    ...(row.country ? { country: row.country } : {}), languages: row.languages ?? [],
+    ...(row.country ? { country: row.country } : {}), countries: row.countries?.length ? row.countries : row.country?.split(',').map((value: string) => value.trim()).filter(Boolean) ?? [],
+    languages: row.languages ?? [], tags: row.tags ?? [],
     ...(row.summary ? { summary: row.summary } : {}), ...(row.poster_url ? { posterUrl: row.poster_url } : {}),
+    ...(row.edition_notes ? { editionNotes: row.edition_notes } : {}),
     credits: row.credits ?? [], externalIds: row.external_ids ?? {}, metadataSources: row.metadata_sources ?? [],
     technicalMetadata: row.technical_metadata, treeStrategy: row.tree_strategy, treeValue: row.tree_value,
     state: row.state, createdAt: new Date(row.created_at).toISOString(), updatedAt: new Date(row.updated_at).toISOString()
@@ -133,10 +136,11 @@ export class PostgresAvRepository implements AvRepository {
       const itemId = randomUUID(); const operationId = randomUUID();
       const itemResult = await client.query(
         `INSERT INTO aby.av_catalog_items
-         (id,owner_id,bucket,source_object_key,destination_object_key,title,original_title,kind,year,director,entity,saga,country,languages,summary,poster_url,credits,external_ids,metadata_sources,technical_metadata,tree_strategy,tree_value,state)
-         VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,'queued') RETURNING *`,
+         (id,owner_id,bucket,source_object_key,destination_object_key,title,original_title,kind,year,director,composer,entity,saga,country,countries,languages,tags,summary,edition_notes,poster_url,credits,external_ids,metadata_sources,technical_metadata,tree_strategy,tree_value,state)
+         VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,'queued') RETURNING *`,
         [itemId, ownerId, bucket, input.sourceObjectKey, input.destinationObjectKey, input.title, input.originalTitle ?? null, input.kind, input.year ?? null,
-          input.director ?? null, input.entity ?? null, input.saga ?? null, input.country ?? null, postgresJson(input.languages), input.summary ?? null, input.posterUrl ?? null,
+          input.director ?? null, input.composer ?? null, input.entity ?? null, input.saga ?? null, input.countries[0] ?? input.country ?? null,
+          postgresJson(input.countries), postgresJson(input.languages), postgresJson(input.tags), input.summary ?? null, input.editionNotes ?? null, input.posterUrl ?? null,
           postgresJson(input.credits), postgresJson(input.externalIds), postgresJson(input.metadataSources), postgresJson(technicalMetadata), input.treeStrategy, input.treeValue]
       );
       const operationResult = await client.query(
