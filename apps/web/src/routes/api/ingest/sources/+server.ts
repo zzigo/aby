@@ -34,7 +34,8 @@ export const GET: RequestHandler = (event) => api('ingest.sources', async () => 
     return { sources: [sourceRecord('ref/20 late/Gavin Bryars/The Sinking of the Titanic/Sinking of the Titanic.mp3', config)], total: 1 };
   }
 
-  const records = await allSources();
+  const media = event.url.searchParams.get('media');
+  const records = (await allSources()).filter((source) => media === 'aud' || media === 'mov' ? source.mediaKind === media : true);
   const mode = event.url.searchParams.get('mode') ?? 'surf';
   if (mode === 'random') return { sources: randomSample(records, 1), total: records.length };
 

@@ -222,7 +222,7 @@ export async function listWasabiSourceKeys(): Promise<string[]> {
         for (const obj of response.Contents) {
           if (!obj.Key || obj.Key.endsWith('/')) continue;
           const ext = extname(obj.Key).toLowerCase();
-          if (!['.mp3', '.wav', '.m4a', '.flac', '.ogg', '.aac', '.mp4', '.mov', '.mkv', '.m4v', '.avi', '.webm'].includes(ext)) continue;
+          if (!['.mp3', '.wav', '.m4a', '.flac', '.ogg', '.aac', '.mp4', '.mov', '.mkv', '.vob', '.m4v', '.avi', '.webm'].includes(ext)) continue;
           let logicalKey = obj.Key;
           if (root && logicalKey.startsWith(root)) logicalKey = logicalKey.substring(root.length);
           keys.push(logicalKey);
@@ -257,7 +257,7 @@ export async function listWasabiSiblingKeys(objectKey: string): Promise<string[]
       for (const obj of response.Contents) {
         if (!obj.Key || obj.Key.endsWith('/')) continue;
         const ext = extname(obj.Key).toLowerCase();
-        if (!['.mp3', '.wav', '.m4a', '.flac', '.ogg', '.aac', '.mp4', '.mov', '.mkv', '.m4v', '.avi', '.webm'].includes(ext)) continue;
+        if (!['.mp3', '.wav', '.m4a', '.flac', '.ogg', '.aac', '.mp4', '.mov', '.mkv', '.vob', '.m4v', '.avi', '.webm'].includes(ext)) continue;
         let logicalKey = obj.Key;
         if (root && logicalKey.startsWith(root)) logicalKey = logicalKey.substring(root.length);
         if (dirname(logicalKey) !== dir) continue;

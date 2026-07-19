@@ -10,7 +10,7 @@
     "services/*"
   ],
   "scripts": {
-    "dev": "bun --filter @aby/web dev",
+    "dev": "bun --env-file=.env --filter @aby/web dev",
     "build": "bun run build:packages && bun --filter @aby/web build",
     "build:packages": "bun --filter @zztt/aby-domain build && bun --filter @zztt/aby-sdk build && bun --filter @zztt/aby-media-ingest build",
     "typecheck": "bun run build:packages && bun --filter @aby/web check",

@@ -80,16 +80,21 @@ async function internetArchiveCandidates(query: string, year?: number): Promise<
   });
 }
 
-export async function searchAvMetadata(query: string, year?: number): Promise<{ candidates: AvMetadataCandidate[]; services: Record<string, string> }> {
+export type AvMetadataService = 'tmdb' | 'wikidata' | 'internet-archive';
+
+export async function searchAvMetadata(query: string, year?: number, requested?: AvMetadataService): Promise<{ candidates: AvMetadataCandidate[]; services: Record<string, string> }> {
   const config = readConfig();
-  const settled = await Promise.allSettled([
-    tmdbCandidates(query, year), wikidataCandidates(query), internetArchiveCandidates(query, year)
-  ]);
-  const names = ['tmdb', 'wikidata', 'internetArchive'] as const;
+  const available = [
+    { id: 'tmdb' as const, label: 'tmdb', load: () => tmdbCandidates(query, year) },
+    { id: 'wikidata' as const, label: 'wikidata', load: () => wikidataCandidates(query) },
+    { id: 'internet-archive' as const, label: 'internetArchive', load: () => internetArchiveCandidates(query, year) }
+  ];
+  const selected = requested ? available.filter((service) => service.id === requested) : available;
+  const settled = await Promise.allSettled(selected.map((service) => service.load()));
   const services: Record<string, string> = {};
   const candidates: AvMetadataCandidate[] = [];
   settled.forEach((result, index) => {
-    const name = names[index]!;
+    const name = selected[index]!.label;
     if (result.status === 'fulfilled') {
       candidates.push(...result.value);
       services[name] = name === 'tmdb' && !config.tmdbConfigured ? 'not-configured' : 'ok';

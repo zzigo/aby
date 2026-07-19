@@ -1,5 +1,5 @@
 import { api, ownerFor } from '$lib/server/errors';
-import { getTmdbMovieDetails, searchAvMetadata } from '$lib/server/av-metadata';
+import { getTmdbMovieDetails, searchAvMetadata, type AvMetadataService } from '$lib/server/av-metadata';
 import type { RequestHandler } from './$types';
 
 export const GET: RequestHandler = (event) => api('av.metadata.search', async () => {
@@ -9,5 +9,7 @@ export const GET: RequestHandler = (event) => api('av.metadata.search', async ()
   const query = event.url.searchParams.get('q')?.trim();
   if (!query) return { candidates: [], services: {} };
   const parsedYear = Number(event.url.searchParams.get('year'));
-  return searchAvMetadata(query, Number.isInteger(parsedYear) && parsedYear >= 1800 ? parsedYear : undefined);
+  const service = event.url.searchParams.get('service');
+  const requested = service === 'tmdb' || service === 'wikidata' || service === 'internet-archive' ? service as AvMetadataService : undefined;
+  return searchAvMetadata(query, Number.isInteger(parsedYear) && parsedYear >= 1800 ? parsedYear : undefined, requested);
 });

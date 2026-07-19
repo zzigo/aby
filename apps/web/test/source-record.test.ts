@@ -20,3 +20,9 @@ test('extracts the creator from a collective album directly below Impro', () => 
 test('preserves century folders as collection codes', () => {
   expect(sourceRecord('ref/19/Claude Debussy/La Mer/01 De l’aube.mp3', config).collectionCode).toBe('19');
 });
+
+test('routes legacy VOB film sources to the AV inspection pipeline', () => {
+  expect(sourceRecord('mov/1970s/Andrei Tarkovsky/Stalker/VIDEO_TS/VTS_01_1.VOB', config)).toMatchObject({
+    mediaKind: 'mov', creatorDisplay: 'Stalker', workTitle: 'VIDEO_TS', recordingTitle: 'VTS_01_1'
+  });
+});

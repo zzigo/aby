@@ -203,7 +203,7 @@
     busy = true;
     status = 'Checking Wasabi storage for untracked sources…';
     try {
-      const response = await fetch('/api/ingest/sources?mode=random');
+      const response = await fetch('/api/ingest/sources?mode=random&media=aud');
       const body = await response.json();
       if (!response.ok) throw new Error(body.error?.message ?? 'Failed to load source list');
       
@@ -255,7 +255,7 @@
   async function loadSurfSources(query = surfQuery) {
     loadingSurf = true;
     try {
-      const params = new SvelteURLSearchParams({ mode: 'surf', limit: '150' });
+      const params = new SvelteURLSearchParams({ mode: 'surf', media: 'aud', limit: '150' });
       if (query.trim()) params.set('q', query.trim());
       const response = await fetch(`/api/ingest/sources?${params}`);
       const body = await response.json();
@@ -410,7 +410,7 @@
         {#if showSurfList}
           <div style="margin-top: 12px; border: 1px solid var(--line); padding: 12px; background: #131412; max-height: 280px; display: flex; flex-direction: column; gap: 8px; overflow: hidden; z-index: 10;">
             <div class="surf-search">
-              <input type="text" bind:value={surfQuery} oninput={queueSurfSearch} placeholder="Search all ref / mov…" />
+              <input type="text" bind:value={surfQuery} oninput={queueSurfSearch} placeholder="Search audio in ref/…" />
               <button onclick={() => loadSurfSources(surfQuery)} aria-label="Refresh source sample">↻</button>
             </div>
             <small class="surf-count">{surfQuery.trim() ? `${surfTotal} matches` : `${surfSources.length} sampled from ${surfTotal}`}</small>

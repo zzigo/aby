@@ -1,16 +1,20 @@
 # Audiovisual surface
 
-`VIEW` is Aby's audiovisual instrument over the private Wasabi source pool `wasabi:zzttuntref/mov`. It reuses the product rules established by `LISTEN` without pretending that large video objects can be adopted synchronously.
+Audiovisual adoption starts in `INSPECT`; `VIEW` is the resulting mosaic and temporal player. The AV source pool remains private at `wasabi:zzttuntref/mov`. The split reuses the product rules established by the audio `INSPECT` → `GALLERY`/`LISTEN` workflow without pretending that large video objects can be adopted synchronously.
+
+`INSPECT` has an explicit `AUDIO` / `AV VIDEO` switch. Each medium keeps distinct source prefixes, canonical editors, metadata authorities and destination rules. `SURPRISE ME` is shared as an interaction pattern but always samples only the active medium.
 
 ## Deferred adoption
 
-`Add to catalog` performs metadata work only:
+The AV `COMMIT TO CATALOG` action performs metadata work only:
 
-1. validate that the source remains below `mov/`;
-2. read size, content type and ETag with an object `HEAD`;
-3. retain provenance-bearing candidates from TMDB, Wikidata and Internet Archive;
-4. propose a human-readable destination below `aby/mov/`;
-5. persist an AV catalog row and one `pending` storage operation.
+1. choose an MKV, MOV, VOB, MP4, M4V, AVI or WebM below `mov/`;
+2. read size, content type and ETag with an object `HEAD` and run bounded `ffprobe` through a temporary source URL;
+3. initialize editable canonical fields from embedded container metadata;
+4. reload TMDB, Wikidata and Internet Archive independently;
+5. copy a selected authority candidate into the canonical editor only after explicit `USE`;
+6. propose a human-readable destination below `aby/mov/`;
+7. persist the reviewed AV catalog row and one `pending` storage operation.
 
 No copy or move occurs in this request. `EXECUTE` is a later, explicit action. It starts `rclone copyto` and records a process beacon with origin, destination, state, size, bytes transferred, speed, ETA and timestamps. The source is not deleted after completion.
 
@@ -34,7 +38,9 @@ Changing the strategy changes the proposed destination, not the stable database 
 
 ## Metadata and analysis layers
 
-The first metadata query fans out to TMDB, Wikidata and Internet Archive. TMDB accepts `TMDB_READ_ACCESS_TOKEN` (preferred) or `TMDB_API_KEY` as a fallback; Wikidata and Internet Archive are useful for rare, experimental, Soviet, archival and educational material. IMDb IDs remain first-class external identifiers even though IMDb is not treated as an open metadata API.
+TMDB, Wikidata and Internet Archive can be reloaded independently without overwriting canonical fields. TMDB accepts `TMDB_READ_ACCESS_TOKEN` (preferred) or `TMDB_API_KEY` as a fallback; Wikidata and Internet Archive are useful for rare, experimental, Soviet, archival and educational material. IMDb IDs remain first-class external identifiers even though IMDb is not treated as an open metadata API.
+
+After commit, the item appears in `VIEW`. That route combines a poster mosaic with search, type/decade/country filters, configurable property visibility and tile sizes. Selecting a tile opens the player, film metadata, credits, subtitle controls and capture tools without leaving the mosaic context. Source selection, authority search, canonical editing and the deferred storage thread remain in `INSPECT`.
 
 The following tools are declared as later workers rather than synchronous UI promises: ffmpeg inspection, VideoHash/perceptual hashes, PySceneDetect, OCR, WhisperX, CLIP scene embeddings and Qdrant indexing. PostgreSQL remains authoritative; vector indexes and analysis artifacts are reconstructible.
 
