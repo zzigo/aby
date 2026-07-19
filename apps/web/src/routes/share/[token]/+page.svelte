@@ -25,7 +25,7 @@
   <figure>
     {#if data.capture.mediaKind === 'video'}
       <!-- svelte-ignore a11y_media_has_caption -->
-      <video bind:this={media} src={data.mediaUrl} poster={data.posterUrl} playsinline preload="metadata" onloadedmetadata={initialize} ontimeupdate={enforceBounds} onseeked={enforceBounds} onplay={() => playing=true} onpause={() => playing=false}></video>
+      <video bind:this={media} src={data.mediaUrl} playsinline preload="auto" onloadedmetadata={initialize} ontimeupdate={enforceBounds} onseeked={enforceBounds} onplay={() => playing=true} onpause={() => playing=false}></video>
     {:else}
       <audio bind:this={media} src={data.mediaUrl} preload="metadata" onloadedmetadata={initialize} ontimeupdate={enforceBounds} onseeked={enforceBounds} onplay={() => playing=true} onpause={() => playing=false}></audio>
     {/if}
