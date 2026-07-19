@@ -82,7 +82,8 @@
   let albumTags = $state(untrack(() => initialItems[0]?.asset.canonicalMetadata.albumTags?.join(', ') ?? ''));
   let genres = $state<string[]>(untrack(() => [...(initialItems[0]?.asset.canonicalMetadata.genres ?? [])]));
   let styles = $state<string[]>(untrack(() => [...(initialItems[0]?.asset.canonicalMetadata.styles ?? [])]));
-  let roles = $state<AlbumRole[]>(untrack(() => structuredClone(initialItems[0]?.asset.canonicalMetadata.roles ?? [])));
+  const copyRoles = (values: AlbumRole[] = []) => values.map((role) => ({ ...role }));
+  let roles = $state<AlbumRole[]>(untrack(() => copyRoles(initialItems[0]?.asset.canonicalMetadata.roles)));
   let notes = $state(untrack(() => initialItems[0]?.asset.canonicalMetadata.albumNotes ?? ''));
   let collectionCode = $state(untrack(() => initialItems[0]?.asset.canonicalMetadata.collectionCode ?? ''));
   let candidate = $state<DiscogsCandidate | null>(untrack(() => {
@@ -376,7 +377,7 @@
       albumTags = canonical?.albumTags?.join(', ') ?? '';
       genres = [...(canonical?.genres ?? [])];
       styles = [...(canonical?.styles ?? [])];
-      roles = structuredClone(canonical?.roles ?? []);
+      roles = copyRoles(canonical?.roles);
       message = `Applied to ${body.items.length} track${body.items.length === 1 ? '' : 's'}`;
     } catch (error) {
       message = error instanceof Error ? error.message : 'Discogs apply failed';
