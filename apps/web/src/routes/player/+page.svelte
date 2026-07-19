@@ -301,10 +301,11 @@
         const endMs = $currentPlaybackTimeMs;
         const startMs = Math.max(0, endMs - 5000);
         if (endMs > startMs) await saveMobileSegment(startMs, endMs);
-      } else if (event.key.toLowerCase() === 'e' && $currentPlayback) {
+      } else if (event.key.toLowerCase() === 'e') {
         event.preventDefault();
         const playingItem = items.find((item) => item.asset.id === $currentPlayback?.assetId);
-        if (playingItem) editItem(playingItem);
+        const targetItem = selected ?? playingItem;
+        if (targetItem) editAlbumForItem(targetItem);
       }
     };
     window.addEventListener('keydown', handleShortcut);
@@ -424,12 +425,25 @@
   function editItem(item: CatalogItem) {
     openActionsId = null;
     suppressClickId = '';
+    editingAlbumItems = null;
     editingItem = item;
   }
 
-  function editAlbum(albumItems: CatalogItem[]) {
+  function editAlbumById(albumId: string) {
     openActionsId = null;
-    editingAlbumItems = albumItems;
+    suppressClickId = '';
+    const completeAlbum = items.filter((item) => item.albumId === albumId);
+    if (!completeAlbum.length) {
+      message = 'This album no longer resolves in the catalog.';
+      return;
+    }
+    editingItem = null;
+    editingAlbumItems = sortTracks([...completeAlbum]);
+  }
+
+  function editAlbumForItem(item: CatalogItem) {
+    if (item.albumId) editAlbumById(item.albumId);
+    else editItem(item);
   }
 
   function playFromCatalog(item: CatalogItem) {
@@ -612,7 +626,7 @@
               </button>
               <section class="cover-flip__face cover-flip__back cover-back" aria-label="Album metadata">
                 <button class="cover-flip__button flip-back-control" onclick={() => coverFlipped = false} aria-label="Return to cover" title="Return to cover">×</button>
-                <button class="cover-edit-control" onclick={() => editItem(selected!)} aria-label={`Edit ${selected.recordingTitle}`} title="Edit track">✎</button>
+                <button class="cover-edit-control" onclick={() => editAlbumForItem(selected!)} aria-label={`Edit ${selected.albumTitle ?? selected.recordingTitle}`} title={selected.albumId ? 'Edit album' : 'Edit track'}>✎</button>
                 <dl>
                   <div><dt>Track</dt><dd>{displayTrackTitle(selected.recordingTitle, selected.trackNumber)}</dd></div>
                   <div><dt>Album</dt><dd>{selected.albumTitle ?? '—'}</dd></div>
@@ -758,7 +772,8 @@
       {#if catalogMode === 'album'}
         {#each albumGroups as album (album.id)}
           <details class="album-group ontology-root">
-            <summary><span>{album.title}</span><span class="album-meta"><small>{album.items.length} tracks</small>{#if album.albumId}<button onclick={(event) => { event.preventDefault(); event.stopPropagation(); editAlbum(album.items); }} aria-label={`Edit album ${album.title}`} title="Edit album">✎</button>{/if}</span></summary>
+            <summary><span>{album.title}</span><span class="album-meta"><small>{album.items.length} tracks</small></span></summary>
+            {#if album.albumId}<button class="album-edit-button" onclick={() => editAlbumById(album.albumId!)} aria-label={`Edit album ${album.title}`} title="Edit album">✎</button>{/if}
             {#each album.items as item (item.asset.id)}{@render trackRow(item)}{/each}
           </details>
         {:else}<p class="catalog-empty">No matching items.</p>{/each}
@@ -767,7 +782,7 @@
           <section class="work-group"><h3>{work.title}</h3>
             {#each work.direct as item (item.asset.id)}{@render trackRow(item)}{/each}
             {#each work.albums as album (album.id)}
-              <details class="album-group"><summary><span>{album.title}</span><span class="album-meta"><small>version · {album.items.length}</small><button onclick={(event) => { event.preventDefault(); event.stopPropagation(); editAlbum(album.items); }} aria-label={`Edit version ${album.title}`} title="Edit album version">✎</button></span></summary>{#each album.items as item (item.asset.id)}{@render trackRow(item)}{/each}</details>
+              <details class="album-group"><summary><span>{album.title}</span><span class="album-meta"><small>version · {album.items.length}</small></span></summary><button class="album-edit-button" onclick={() => editAlbumById(album.id)} aria-label={`Edit version ${album.title}`} title="Edit album version">✎</button>{#each album.items as item (item.asset.id)}{@render trackRow(item)}{/each}</details>
             {/each}
           </section>
         {:else}<p class="catalog-empty">No matching items.</p>{/each}
@@ -798,7 +813,7 @@
 <style>
   .work-group>h3{margin:16px 14px 7px;font:600 11px/1.2 ui-monospace,monospace;letter-spacing:.08em;text-transform:uppercase;color:var(--signal)}
   .catalog-header{height:48px;display:flex;align-items:center;gap:12px;padding:0 14px;border-bottom:1px solid var(--line);background:#0e0f0e}.catalog-modes{display:flex;gap:2px}.catalog-modes button{width:34px;height:34px;padding:0;border:0;background:transparent;color:var(--muted);font:16px ui-monospace,monospace}.catalog-modes button.active{background:var(--signal);color:#10110f}.catalog-search{height:34px;min-width:100px;flex:1;display:flex;align-items:center;gap:7px;border-bottom:1px solid #3b3f39;color:var(--muted)}.catalog-search input{width:100%;min-width:0;border:0;background:transparent;color:#fff;outline:0;font:10px ui-monospace,monospace;letter-spacing:.08em}.ontology-root{border-top:0;border-bottom:1px solid var(--line)}
-  .album-group{margin:0;border-top:1px solid var(--line)}.album-group summary{display:flex;justify-content:space-between;align-items:center;padding:7px 8px 7px 14px;cursor:pointer;font-size:12px;background:#121411;list-style-position:inside}.album-group summary small{color:var(--muted);font:9px ui-monospace,monospace}.album-group[open] summary{background:#181b16}.album-meta{display:flex;align-items:center;gap:8px}.album-meta button{width:34px;height:30px;border:0;background:transparent;color:var(--muted);font-size:16px}.album-meta button:hover,.album-meta button:focus-visible{color:var(--signal)}
+  .album-group{position:relative;margin:0;border-top:1px solid var(--line)}.album-group summary{display:flex;justify-content:space-between;align-items:center;min-height:44px;padding:7px 52px 7px 14px;box-sizing:border-box;cursor:pointer;font-size:12px;background:#121411;list-style-position:inside}.album-group summary small{color:var(--muted);font:9px ui-monospace,monospace}.album-group[open] summary{background:#181b16}.album-meta{display:flex;align-items:center;gap:8px}.album-edit-button{position:absolute;z-index:3;top:6px;right:8px;width:36px;height:32px;border:1px solid transparent;background:#151714;color:var(--muted);font-size:16px}.album-edit-button:hover,.album-edit-button:focus-visible{border-color:var(--signal);color:var(--signal)}
   .catalog-items article{position:relative;overflow:hidden;touch-action:pan-y}.catalog-primary{position:relative;z-index:1;padding-right:68px;transition:transform .16s ease;background:var(--surface)}.actions-open .catalog-primary{transform:translateX(92px)}
   .item-actions{position:absolute;inset:0 auto 0 0;width:92px;display:grid;grid-template-columns:1fr 1fr;background:var(--signal)}.item-actions button{border:0;border-right:1px solid #1c2117;background:transparent;color:#10110f;font-size:20px}
   .catalog-edit{position:absolute;z-index:2;top:50%;right:12px;width:38px;height:38px;padding:0;transform:translateY(-50%);border:0;background:transparent;color:var(--muted);font-size:17px}.catalog-edit:hover,.catalog-edit:focus-visible{color:var(--signal)}.actions-open .catalog-edit{pointer-events:none;opacity:0}
