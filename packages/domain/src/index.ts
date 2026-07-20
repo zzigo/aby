@@ -80,6 +80,31 @@ export const AlbumSetSchema = z.object({
 });
 export type AlbumSet = z.infer<typeof AlbumSetSchema>;
 
+export const BookletPageSchema = z.object({
+  sourceObjectKey: z.string().min(1),
+  objectKey: z.string().min(1),
+  pageNumber: z.number().int().positive(),
+  sourcePage: z.number().int().positive().optional(),
+  contentType: z.string().min(1),
+  crop: z.object({
+    x: z.number().min(0).max(100),
+    y: z.number().min(0).max(100),
+    width: z.number().positive().max(100),
+    height: z.number().positive().max(100)
+  }).optional(),
+  addedAt: z.string().datetime()
+});
+export type BookletPage = z.infer<typeof BookletPageSchema>;
+
+export const SupplementalFileDecisionSchema = z.object({
+  sourceObjectKey: z.string().min(1),
+  role: z.enum(['booklet', 'score', 'discarded']),
+  destinationObjectKey: z.string().min(1).optional(),
+  pageNumber: z.number().int().positive().optional(),
+  decidedAt: z.string().datetime()
+});
+export type SupplementalFileDecision = z.infer<typeof SupplementalFileDecisionSchema>;
+
 export const CandidateMetadataSchema = z.object({
   title: z.string().min(1),
   recordingTitle: z.string().min(1),
@@ -96,6 +121,8 @@ export const CandidateMetadataSchema = z.object({
   notes: z.string().trim().max(20_000).optional(),
   albumNotes: z.string().trim().max(20_000).optional(),
   albumSet: AlbumSetSchema.optional(),
+  bookletPages: z.array(BookletPageSchema).max(500).optional(),
+  supplementalFiles: z.array(SupplementalFileDecisionSchema).max(1_000).optional(),
   waveform: z.object({
     artifactObjectKey: z.string().min(1),
     sourceChecksumSha256: z.string().regex(/^[a-f0-9]{64}$/),
@@ -299,6 +326,8 @@ export const AssetSchema = z.object({
   bucket: z.string().optional(),
   objectKey: z.string(),
   originalFilename: z.string(),
+  originalObjectKey: z.string().optional(),
+  originalDirectory: z.string().optional(),
   checksumSha256: z.string().regex(/^[a-f0-9]{64}$/),
   technicalMetadata: TechnicalMetadataSchema,
   canonicalMetadata: CandidateMetadataSchema,

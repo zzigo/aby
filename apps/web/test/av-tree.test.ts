@@ -6,14 +6,14 @@ describe('AV tree proposals', () => {
     expect(proposeAvDestination({
       sourceObjectKey: 'mov/Stalker 1979 Final.mkv',
       title: 'Stalker', year: 1979, strategy: 'author', treeValue: 'Andrei Tarkovsky'
-    })).toBe('aby/mov/1970s/tarkovsky/1979-Stalker/stalker-1979-final.mkv');
+    })).toBe('aby/mov/1970s/tarkovsky/1979-Stalker.mkv');
   });
 
   test('uses a direct semantic folder without redundant saga or entity levels', () => {
     expect(proposeAvDestination({
       sourceObjectKey: 'mov/Dune Part Two.mp4',
       title: 'Dune: Part Two', year: 2024, strategy: 'saga', treeValue: 'Dune'
-    })).toBe('aby/mov/dune/2024-Dune: Part Two/dune-part-two.mp4');
+    })).toBe('aby/mov/dune/2024-Dune: Part Two.mp4');
   });
 
   test('normalizes diacritics only for structural slugs', () => {

@@ -39,6 +39,8 @@
   let editingItem = $state<CatalogItem | null>(null);
   let editingAlbumItems = $state<CatalogItem[] | null>(null);
   let coverFlipped = $state(false);
+  let bookletPageIndex = $state(-1);
+  let bookletAssetId = $state('');
   let captureBusy = $state(false);
   let captureLabel = $state('');
   let lastCapture = $state<Capture | null>(null);
@@ -161,6 +163,7 @@
   const selectedAlbumIndex = $derived(navigationAlbums.findIndex((album) => album.id === selectedAlbumId));
   const selectedAlbumItems = $derived(selectedAlbumIndex >= 0 ? navigationAlbums[selectedAlbumIndex]?.items ?? [] : []);
   const selectedAssetId = $derived(selected?.asset.id ?? '');
+  const selectedBookletPages = $derived(selected?.asset.canonicalMetadata.bookletPages ?? []);
   const selectedTrackIndex = $derived(selectedAssetId ? selectedAlbumItems.findIndex((item) => item.asset.id === selectedAssetId) : -1);
   const activeLyricIndex = $derived.by(() => {
     if (!lyricsDocument?.cues.length || lyricsDocument.syncLevel === 'none') return -1;
@@ -171,6 +174,12 @@
       else if (cue.startMs !== null && cue.startMs > adjustedTime) break;
     }
     return active;
+  });
+  $effect(() => {
+    if (selectedAssetId !== bookletAssetId) {
+      bookletAssetId = selectedAssetId;
+      bookletPageIndex = -1;
+    }
   });
   $effect(() => {
     const index = activeLyricIndex;
@@ -525,7 +534,12 @@
 
   async function showCoverMetadata() {
     coverFlipped = true;
+    bookletPageIndex = -1;
     if (selected?.hasLyrics && !lyricsDocument) await loadLyricsDocument(false);
+  }
+
+  function navigateBooklet(direction: number) {
+    bookletPageIndex = Math.max(-1, Math.min(selectedBookletPages.length - 1, bookletPageIndex + direction));
   }
 
   function acceptLyrics(lyrics: TimedTextDocument) {
@@ -640,19 +654,38 @@
               <section class="cover-flip__face cover-flip__back cover-back" aria-label="Album metadata">
                 <button class="cover-flip__button flip-back-control" onclick={() => coverFlipped = false} aria-label="Return to cover" title="Return to cover">×</button>
                 <button class="cover-edit-control" onclick={() => editAlbumForItem(selected!)} aria-label={`Edit ${selected.albumTitle ?? selected.recordingTitle}`} title={selected.albumId ? 'Edit album' : 'Edit track'}>✎</button>
-                <dl>
-                  <div><dt>Track</dt><dd>{displayTrackTitle(selected.recordingTitle, selected.trackNumber)}</dd></div>
-                  <div><dt>Album</dt><dd>{selected.albumTitle ?? '—'}</dd></div>
-                  <div><dt>Artist</dt><dd>{selected.albumArtist ?? selected.creator ?? '—'}</dd></div>
-                  <div><dt>Work</dt><dd>{selected.workTitle}</dd></div>
-                  <div><dt>Release</dt><dd>{selected.releaseDate ?? '—'}</dd></div>
-                  <div><dt>Label</dt><dd>{selected.label ?? '—'}</dd></div>
-                  <div><dt>Format</dt><dd>{formatTechnicalFormat(selected.asset.technicalMetadata)}</dd></div>
-                  <div><dt>Length</dt><dd>{formatDuration(selected.asset.technicalMetadata.durationMs)}</dd></div>
-                  <div class="notes"><dt>Notes</dt><dd>{selected.asset.canonicalMetadata.notes ?? selected.asset.canonicalMetadata.albumNotes ?? '—'}</dd></div>
-                  {#if selected.hasLyrics}<div class="back-lyrics"><dt>Plain lyrics</dt><dd>{lyricsDocument?.plainText ?? (lyricsLoading ? 'Loading…' : '—')}</dd></div>{/if}
-                </dl>
-                {#if selected.hasLyrics}<nav class="cover-back-nav"><button onclick={toggleLyrics}>Lyrics</button></nav>{/if}
+                {#if bookletPageIndex < 0}
+                  <dl>
+                    <div><dt>Track</dt><dd>{displayTrackTitle(selected.recordingTitle, selected.trackNumber)}</dd></div>
+                    <div><dt>Album</dt><dd>{selected.albumTitle ?? '—'}</dd></div>
+                    <div><dt>Artist</dt><dd>{selected.albumArtist ?? selected.creator ?? '—'}</dd></div>
+                    <div><dt>Work</dt><dd>{selected.workTitle}</dd></div>
+                    <div><dt>Release</dt><dd>{selected.releaseDate ?? '—'}</dd></div>
+                    <div><dt>Label</dt><dd>{selected.label ?? '—'}</dd></div>
+                    <div><dt>Format</dt><dd>{formatTechnicalFormat(selected.asset.technicalMetadata)}</dd></div>
+                    <div><dt>Length</dt><dd>{formatDuration(selected.asset.technicalMetadata.durationMs)}</dd></div>
+                    <div class="notes"><dt>Notes</dt><dd>{selected.asset.canonicalMetadata.notes ?? selected.asset.canonicalMetadata.albumNotes ?? '—'}</dd></div>
+                    {#if selected.hasLyrics}<div class="back-lyrics"><dt>Plain lyrics</dt><dd>{lyricsDocument?.plainText ?? (lyricsLoading ? 'Loading…' : '—')}</dd></div>{/if}
+                  </dl>
+                {:else if selectedBookletPages[bookletPageIndex]}
+                  {@const bookletPage = selectedBookletPages[bookletPageIndex]}
+                  <div class="booklet-page">
+                    {#if bookletPage.contentType === 'application/pdf'}
+                      <iframe title={`Booklet page ${bookletPage.pageNumber}`} src={`/api/assets/${selected.asset.id}/booklet/${bookletPage.pageNumber}`}></iframe>
+                    {:else}
+                      <img src={`/api/assets/${selected.asset.id}/booklet/${bookletPage.pageNumber}`} alt={`Booklet page ${bookletPage.pageNumber}`} />
+                    {/if}
+                  </div>
+                {/if}
+                <nav class="cover-back-nav">
+                  {#if selected.hasLyrics}<button onclick={toggleLyrics}>Lyrics</button>{/if}
+                  {#if selectedBookletPages.length}
+                    <button onclick={() => bookletPageIndex = -1} class:active={bookletPageIndex < 0}>Metadata</button>
+                    <button onclick={() => navigateBooklet(-1)} disabled={bookletPageIndex < 0}>‹</button>
+                    <span>{bookletPageIndex < 0 ? `Booklet · ${selectedBookletPages.length}` : `Page ${selectedBookletPages[bookletPageIndex]?.pageNumber}`}</span>
+                    <button onclick={() => navigateBooklet(1)} disabled={bookletPageIndex >= selectedBookletPages.length - 1}>›</button>
+                  {/if}
+                </nav>
               </section>
             </div>
           </div>

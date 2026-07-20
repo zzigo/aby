@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { assertAbyObjectKey, assertSourceObjectKey, toWasabiKey } from '../src/lib/server/storage';
+import { assertAbyObjectKey, assertScoreObjectKey, assertSourceObjectKey, toWasabiKey } from '../src/lib/server/storage';
 
 test('storage keys cannot escape the Aby prefix', () => {
   expect(assertAbyObjectKey('aby/aud/20L/boulez/Repons/example.flac')).toBe('aby/aud/20L/boulez/Repons/example.flac');
@@ -23,4 +23,9 @@ test('legacy source keys preserve their exact Unicode form', () => {
   const decomposed = 'ref/experimental/TA\u0303ªte.mp3';
   expect(assertSourceObjectKey(decomposed)).toBe(decomposed);
   expect(toWasabiKey(decomposed, 'zzttuntref/')).toBe(`zzttuntref/${decomposed}`);
+});
+
+test('score destinations cannot escape the fixed libros boundary', () => {
+  expect(assertScoreObjectKey('libros/scores/Mahler/score.pdf')).toBe('libros/scores/Mahler/score.pdf');
+  expect(() => assertScoreObjectKey('libros/other/score.pdf')).toThrow();
 });

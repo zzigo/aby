@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { untrack } from 'svelte';
+  import { onMount, untrack } from 'svelte';
   import type { AlbumRole, AlbumSet, CatalogItem } from '@zztt/aby-domain';
   import { formatDuration } from '$lib/presentation';
   import MetadataQueryLab from './MetadataQueryLab.svelte';
@@ -39,6 +39,22 @@
     recordingTitle: string;
     trackNumber: number | null;
     sourceTitle?: string;
+  }
+
+  interface SupplementalFile {
+    objectKey: string;
+    sizeBytes: number;
+    contentType: string;
+    modifiedAt?: string;
+  }
+
+  interface SupplementalEdit {
+    role: 'none' | 'booklet' | 'score' | 'discarded';
+    pageNumber: number;
+    sourcePage?: number;
+    cropEnabled: boolean;
+    crop: { x: number; y: number; width: number; height: number };
+    dirty: boolean;
   }
 
   let { items: initialItems, onclose, onsaved }: {
@@ -105,6 +121,12 @@
   let discogsSetPosition = $state(untrack(() => initialItems[0]?.asset.canonicalMetadata.albumSet?.position ?? ''));
   let message = $state('');
   let busy = $state(false);
+  let supplementalFiles = $state<SupplementalFile[]>([]);
+  let supplementalEdits = $state<Record<string, SupplementalEdit>>({});
+  let supplementalFolder = $state('');
+  let supplementalLevel = $state(0);
+  let supplementalPreview = $state<SupplementalFile | null>(null);
+  let supplementalsLoading = $state(false);
   const discogsSetMembers = $derived(candidate?.tracklist?.filter((track) => /^CD\d+$/i.test(track.position ?? '')) ?? []);
 
   async function jsonRequest(path: string, options: Parameters<typeof fetch>[1]) {
@@ -113,6 +135,81 @@
     if (!response.ok) throw new Error(body.error?.message ?? 'Request failed');
     return body;
   }
+
+  function formatBytes(value: number) {
+    const units = ['B', 'KB', 'MB', 'GB'];
+    let amount = value; let unit = 0;
+    while (amount >= 1000 && unit < units.length - 1) { amount /= 1000; unit += 1; }
+    return `${amount.toLocaleString(undefined, { maximumFractionDigits: unit ? 1 : 0 })} ${units[unit]}`;
+  }
+
+  async function loadSupplementals(level = supplementalLevel) {
+    if (!first) return;
+    supplementalsLoading = true;
+    try {
+      const body = await jsonRequest(`/api/albums/${first.albumId}/supplementals?level=${level}`, {});
+      supplementalLevel = body.level;
+      supplementalFolder = body.directory;
+      supplementalFiles = body.files ?? [];
+      const decisions = new Map((body.decisions ?? []).map((decision: { sourceObjectKey: string }) => [decision.sourceObjectKey, decision]));
+      const pages = new Map((body.bookletPages ?? []).map((page: { sourceObjectKey: string }) => [page.sourceObjectKey, page]));
+      const next = { ...supplementalEdits };
+      for (const [index, file] of supplementalFiles.entries()) {
+        if (next[file.objectKey]) continue;
+        const decision = decisions.get(file.objectKey) as { role?: SupplementalEdit['role']; pageNumber?: number } | undefined;
+        const page = pages.get(file.objectKey) as { pageNumber?: number; sourcePage?: number; crop?: SupplementalEdit['crop'] } | undefined;
+        next[file.objectKey] = {
+          role: decision?.role ?? 'none',
+          pageNumber: page?.pageNumber ?? decision?.pageNumber ?? index + 1,
+          ...(page?.sourcePage ? { sourcePage: page.sourcePage } : {}),
+          cropEnabled: Boolean(page?.crop),
+          crop: page?.crop ?? { x: 0, y: 0, width: 100, height: 100 },
+          dirty: false
+        };
+      }
+      supplementalEdits = next;
+    } catch (error) {
+      message = error instanceof Error ? error.message : 'Lateral files could not be listed';
+    } finally { supplementalsLoading = false; }
+  }
+
+  function markSupplementalDirty(objectKey: string) {
+    supplementalEdits[objectKey].dirty = true;
+  }
+
+  async function applySupplementals() {
+    if (!first) return;
+    const entries = Object.entries(supplementalEdits).filter(([, edit]) => edit.dirty && edit.role !== 'none').map(([sourceObjectKey, edit]) => ({
+      sourceObjectKey, role: edit.role,
+      ...(edit.role === 'booklet' ? {
+        pageNumber: Number(edit.pageNumber),
+        ...(edit.sourcePage ? { sourcePage: Number(edit.sourcePage) } : {}),
+        ...(edit.cropEnabled ? { crop: {
+          x: Number(edit.crop.x), y: Number(edit.crop.y), width: Number(edit.crop.width), height: Number(edit.crop.height)
+        } } : {})
+      } : {})
+    }));
+    if (!entries.length) { message = 'No lateral-file decisions changed'; return; }
+    busy = true;
+    message = 'Applying booklet and score decisions…';
+    try {
+      const body = await jsonRequest(`/api/albums/${first.albumId}/supplementals`, {
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ entries })
+      });
+      acceptItems(body.items);
+      for (const entry of entries) supplementalEdits[entry.sourceObjectKey].dirty = false;
+      message = `${body.bookletPages.length} booklet page${body.bookletPages.length === 1 ? '' : 's'} · score copies remain under libros/scores`;
+    } catch (error) {
+      message = error instanceof Error ? error.message : 'Lateral files could not be applied';
+    } finally { busy = false; }
+  }
+
+  async function copyScoreRoot() {
+    await navigator.clipboard.writeText('wasabi/libros/scores');
+    message = 'wasabi/libros/scores copied';
+  }
+
+  onMount(() => { void loadSupplementals(0); });
 
   function acceptItems(updated: CatalogItem[], preserveTrackEdits = true) {
     const pending = preserveTrackEdits ? new Map(trackEdits.map((track) => [track.assetId, track])) : new Map<string, TrackNameEdit>();
@@ -530,6 +627,37 @@
         </label>
       </section>
 
+      <section class="supplementals">
+        <div class="section-title">
+          <div><h2>Booklet / lateral files</h2><small>Source files remain untouched until an explicit role is applied.</small></div>
+          <div class="supplemental-navigation"><button onclick={() => loadSupplementals(Math.max(0, supplementalLevel - 1))} disabled={supplementalsLoading || supplementalLevel === 0}>↓ CHILD</button><button onclick={() => loadSupplementals(supplementalLevel + 1)} disabled={supplementalsLoading}>↑ PARENT</button></div>
+        </div>
+        <div class="supplemental-path"><span>{supplementalFolder || 'source folder'}</span><button onclick={copyScoreRoot}>SCORES · wasabi/libros/scores</button></div>
+        {#if supplementalFiles.length}
+          <div class="supplemental-list">
+            {#each supplementalFiles as file (file.objectKey)}
+              <article>
+                <button class="supplemental-preview-button" onclick={() => supplementalPreview = file}>PREVIEW</button>
+                <div><strong>{file.objectKey.split('/').at(-1)}</strong><small>{file.contentType} · {formatBytes(file.sizeBytes)}</small></div>
+                <select bind:value={supplementalEdits[file.objectKey].role} onchange={() => markSupplementalDirty(file.objectKey)} aria-label={`Role for ${file.objectKey}`}>
+                  <option value="none">KEEP UNDECIDED</option><option value="booklet">BOOKLET PAGE</option><option value="score">SCORE → LIBROS</option><option value="discarded">DISCARD FROM ALBUM</option>
+                </select>
+                {#if supplementalEdits[file.objectKey].role === 'booklet'}
+                  <div class="page-options">
+                    <label>PAGE<input type="number" min="1" max="999" bind:value={supplementalEdits[file.objectKey].pageNumber} oninput={() => markSupplementalDirty(file.objectKey)} /></label>
+                    {#if file.contentType === 'application/pdf' || file.contentType === 'application/postscript'}<label>SOURCE PAGE<input type="number" min="1" max="10000" bind:value={supplementalEdits[file.objectKey].sourcePage} oninput={() => markSupplementalDirty(file.objectKey)} placeholder="whole file" /></label>{/if}
+                    <label class="crop-switch"><input type="checkbox" bind:checked={supplementalEdits[file.objectKey].cropEnabled} onchange={() => markSupplementalDirty(file.objectKey)} /> CROP</label>
+                    {#if supplementalEdits[file.objectKey].cropEnabled}<div class="crop-values"><label>X %<input type="number" min="0" max="99" bind:value={supplementalEdits[file.objectKey].crop.x} oninput={() => markSupplementalDirty(file.objectKey)} /></label><label>Y %<input type="number" min="0" max="99" bind:value={supplementalEdits[file.objectKey].crop.y} oninput={() => markSupplementalDirty(file.objectKey)} /></label><label>W %<input type="number" min="1" max="100" bind:value={supplementalEdits[file.objectKey].crop.width} oninput={() => markSupplementalDirty(file.objectKey)} /></label><label>H %<input type="number" min="1" max="100" bind:value={supplementalEdits[file.objectKey].crop.height} oninput={() => markSupplementalDirty(file.objectKey)} /></label></div>{/if}
+                  </div>
+                {/if}
+              </article>
+            {/each}
+          </div>
+        {:else}<p class="supplemental-empty">{supplementalsLoading ? 'Scanning folder…' : 'No JPG, PNG, TIFF, EPS or PDF files in this folder.'}</p>{/if}
+        <button class="apply-supplementals" onclick={applySupplementals} disabled={busy || !Object.values(supplementalEdits).some((edit) => edit.dirty && edit.role !== 'none')}>APPLY LATERAL-FILE DECISIONS</button>
+        {#if supplementalPreview}<div class="supplemental-lightbox"><header><strong>{supplementalPreview.objectKey}</strong><button onclick={() => supplementalPreview = null}>×</button></header>{#if supplementalPreview.contentType === 'application/pdf'}<iframe title={supplementalPreview.objectKey} src={`/api/albums/${first.albumId}/supplementals/preview?key=${encodeURIComponent(supplementalPreview.objectKey)}&type=${encodeURIComponent(supplementalPreview.contentType)}`}></iframe>{:else}<img src={`/api/albums/${first.albumId}/supplementals/preview?key=${encodeURIComponent(supplementalPreview.objectKey)}&type=${encodeURIComponent(supplementalPreview.contentType)}`} alt={supplementalPreview.objectKey} />{/if}</div>{/if}
+      </section>
+
       <section class="tracks">
         <div class="section-title">
           <div><h2>Tracks</h2><small>Bulk changes are previewed here and saved atomically with the album</small></div>
@@ -663,5 +791,6 @@
   .cover-actions{display:flex;gap:5px}
   .track-actions{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:5px}.track-actions button{border:1px solid #4a5047;background:#111310;color:#fff;padding:7px 9px;font:9px ui-monospace,monospace}.track-name-editor{display:grid;margin-top:12px}.track-name-row{display:grid;grid-template-columns:64px minmax(0,1fr) 48px;gap:7px;padding:6px 0;border-bottom:1px solid #252823}.track-name-row input{min-width:0;background:#111310;color:#fff;border:1px solid #30332e;padding:9px;font:10px ui-monospace,monospace}.track-name-row small{align-self:center;text-align:right}.track-number{text-align:center}
   .artist{position:relative}.suggestions{position:absolute;z-index:8;left:0;right:0;top:100%;display:grid;background:#0b0c0b;border:1px solid #41463e}.suggestions button{display:flex;justify-content:space-between;gap:8px;padding:9px;border:0;border-bottom:1px solid #292c27;background:#111310;color:#fff;text-align:left;font:9px ui-monospace,monospace}.suggestions small{font-size:8px;text-align:right}
+  .supplementals{grid-column:1/-1;position:relative}.supplemental-navigation{display:flex;gap:5px}.supplemental-navigation button,.supplemental-path button,.supplemental-preview-button,.apply-supplementals{border:1px solid #4a5047;background:#111310;color:#fff;padding:8px 10px;font:9px ui-monospace,monospace}.supplemental-path{margin:10px 0;display:flex;justify-content:space-between;align-items:center;gap:12px;color:#7f867b;font-size:9px;overflow-wrap:anywhere}.supplemental-list{display:grid;border:1px solid #30332e}.supplemental-list article{display:grid;grid-template-columns:auto minmax(180px,1fr) minmax(180px,240px);gap:8px;align-items:center;padding:8px;border-bottom:1px solid #30332e}.supplemental-list article>div{display:grid;gap:3px;min-width:0}.supplemental-list article strong{font-size:10px;overflow-wrap:anywhere}.supplemental-list select,.page-options input{min-width:0;padding:8px;border:1px solid #353a32;background:#0d0f0d;color:#fff;font:9px ui-monospace,monospace}.page-options{grid-column:2/-1!important;display:grid!important;grid-template-columns:90px 120px auto 1fr;align-items:end;gap:8px}.page-options label{display:grid;gap:4px;color:#7f867b;font-size:8px}.page-options .crop-switch{display:flex;align-items:center}.crop-values{display:grid!important;grid-template-columns:repeat(4,1fr);gap:5px}.apply-supplementals{margin-top:12px;border-color:#c8ff52;color:#c8ff52}.apply-supplementals:disabled{opacity:.35}.supplemental-empty{color:#7f867b;font-size:10px}.supplemental-lightbox{position:fixed;z-index:1200;inset:5vh 5vw;display:grid;grid-template-rows:auto 1fr;background:#090a09;border:1px solid #596052;box-shadow:0 20px 80px #000}.supplemental-lightbox header{padding:10px}.supplemental-lightbox header button{border:0;background:transparent;color:#fff;font-size:24px}.supplemental-lightbox img,.supplemental-lightbox iframe{width:100%;height:100%;min-height:0;object-fit:contain;border:0;background:#202020}
   @media(max-width:720px){.album-editor>main{display:block}.grid{grid-template-columns:1fr}.album-editor header,.album-editor footer{padding:12px}.album-editor section{padding:14px;border-right:0}.drop{min-height:190px}footer>div{max-width:65%}footer small{display:none}}
 </style>

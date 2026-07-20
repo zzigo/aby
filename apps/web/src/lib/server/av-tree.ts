@@ -1,4 +1,4 @@
-import { basename, extname } from 'node:path';
+import { extname } from 'node:path';
 import type { AvTreeStrategy } from '@zztt/aby-domain';
 import { AbyError } from './errors';
 import { normalizeObjectKey } from './storage';
@@ -33,10 +33,10 @@ export function proposeAvDestination(input: {
   treeValue: string;
 }): string {
   const extension = extname(input.sourceObjectKey).toLocaleLowerCase();
-  if (!['.mp4', '.mov', '.mkv', '.m4v', '.avi', '.webm'].includes(extension)) {
-    throw new AbyError('unsupported_av_extension', 'VIEW accepts MP4, MOV, MKV, M4V, AVI or WebM sources', 400);
+  if (!['.mp4', '.mov', '.mkv', '.vob', '.m4v', '.avi', '.webm'].includes(extension)) {
+    throw new AbyError('unsupported_av_extension', 'VIEW accepts MP4, MOV, MKV, VOB, M4V, AVI or WebM sources', 400);
   }
-  const filename = `${slug(basename(input.sourceObjectKey, extension))}${extension}`;
+  const filename = `${titleFolder(input.title, input.year)}${extension}`;
   const decade = decadeFolder(input.year);
   const value = input.strategy === 'author' ? authorSurname(input.treeValue) : slug(input.treeValue);
   const hierarchy = input.strategy === 'author'
@@ -44,5 +44,5 @@ export function proposeAvDestination(input: {
     : input.strategy === 'decade'
       ? [value]
       : [value];
-  return normalizeObjectKey(['aby', 'mov', ...hierarchy, titleFolder(input.title, input.year), filename].join('/'));
+  return normalizeObjectKey(['aby', 'mov', ...hierarchy, filename].join('/'));
 }

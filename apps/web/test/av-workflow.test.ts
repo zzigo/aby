@@ -37,6 +37,23 @@ describe('deferred AV catalog workflow', () => {
     expect(created.operation.sizeBytes).toBe(1_125);
   });
 
+  test('allows a pending destination edit and keeps subtitle destinations beside the film', async () => {
+    const repository = new MemoryAvRepository();
+    const created = await repository.createItem('owner-a', 'zzttuntref', {
+      sourceObjectKey: 'mov/Frances Ha/Frances.Ha.mkv', destinationObjectKey: 'aby/mov/2010s/baumbach/2012-Frances Ha.mkv',
+      title: 'Frances Ha', kind: 'film', year: 2012, countries: ['US'], languages: ['en'], tags: [], credits: [],
+      externalIds: {}, metadataSources: [], treeStrategy: 'author', treeValue: 'Baumbach'
+    }, {
+      sizeBytes: 1_000, sidecarSubtitles: [{
+        sourceObjectKey: 'mov/Frances Ha/Frances.Ha.es.srt', destinationObjectKey: 'aby/mov/2010s/baumbach/Frances.Ha.es.srt',
+        language: 'es', sizeBytes: 125
+      }]
+    });
+    const edited = await repository.updatePendingDestination('owner-a', created.operation.id, 'aby/mov/2010s/baumbach/2012-Frances Ha-final.mkv');
+    expect(edited.item.destinationObjectKey).toBe('aby/mov/2010s/baumbach/2012-Frances Ha-final.mkv');
+    expect(edited.item.technicalMetadata.sidecarSubtitles?.[0]?.destinationObjectKey).toBe('aby/mov/2010s/baumbach/Frances.Ha.es.srt');
+  });
+
   test('creates an immutable-time share capture for a staged video', async () => {
     const repository = new MemoryAvRepository();
     const { item } = await repository.createItem('owner-a', 'zzttuntref', {

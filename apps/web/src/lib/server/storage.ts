@@ -1,4 +1,4 @@
-import { CopyObjectCommand, DeleteObjectCommand, GetObjectCommand, HeadObjectCommand, PutObjectCommand, S3Client, ListObjectsV2Command } from '@aws-sdk/client-s3';
+import { CopyObjectCommand, DeleteObjectCommand, GetObjectCommand, HeadObjectCommand, PutObjectCommand, S3Client, ListObjectsV2Command, type _Object } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { createReadStream, createWriteStream } from 'node:fs';
 import { stat } from 'node:fs/promises';
@@ -27,6 +27,24 @@ export function assertSourceObjectKey(value: string, prefixes = ['ref/', 'mov/']
   const key = normalizeObjectKey(value);
   if (!key || key.split('/').some((part) => !part || part === '.' || part === '..') || !prefixes.some((prefix) => key.startsWith(prefix))) {
     throw new AbyError('invalid_source_key', `Source object key must remain below ${prefixes.join(' or ')}`, 400);
+  }
+  return key;
+}
+
+export function assertSupplementalObjectKey(value: string): string {
+  const config = readConfig();
+  const key = normalizeObjectKey(value);
+  const prefixes = [config.sourceAudioPrefix, config.audioPrefix];
+  if (!key || key.split('/').some((part) => !part || part === '.' || part === '..') || !prefixes.some((prefix) => key.startsWith(prefix))) {
+    throw new AbyError('invalid_supplemental_key', `Supplemental source must remain below ${prefixes.join(' or ')}`, 400);
+  }
+  return key;
+}
+
+export function assertScoreObjectKey(value: string): string {
+  const key = normalizeObjectKey(value);
+  if (!key || key.split('/').some((part) => !part || part === '.' || part === '..') || !key.startsWith('libros/scores/')) {
+    throw new AbyError('invalid_score_key', 'Score destination must remain below libros/scores/', 400);
   }
   return key;
 }
@@ -92,6 +110,16 @@ export async function downloadWasabiObject(objectKey: string, destinationPath: s
   await pipeline(response.Body, createWriteStream(destinationPath, { flags: 'wx' }));
 }
 
+export async function downloadWasabiSupplementalObject(objectKey: string, destinationPath: string): Promise<void> {
+  const config = readConfig();
+  const key = assertSupplementalObjectKey(objectKey);
+  const response = await wasabiClient().send(new GetObjectCommand({
+    Bucket: config.WASABI_BUCKET!, Key: toWasabiKey(key, config.wasabiRootPrefix)
+  }));
+  if (!(response.Body instanceof Readable)) throw new AbyError('supplemental_stream_unavailable', 'Wasabi did not return the supplemental file stream', 502);
+  await pipeline(response.Body, createWriteStream(destinationPath, { flags: 'wx' }));
+}
+
 async function canonicalHeadOrNull(objectKey: string) {
   try {
     return await headWasabiObject(objectKey);
@@ -141,6 +169,32 @@ export async function copyWasabiCanonicalObject(sourceObjectKey: string, targetO
   }));
   const head = await headWasabiObject(targetKey);
   return { created: true, sourceObjectKey: sourceKey, targetObjectKey: targetKey, source, head };
+}
+
+export async function copyWasabiSupplementalObject(sourceObjectKey: string, targetObjectKey: string, overwrite = false) {
+  const config = readConfig();
+  const sourceKey = assertSupplementalObjectKey(sourceObjectKey);
+  const targetKey = targetObjectKey.startsWith('libros/scores/')
+    ? assertScoreObjectKey(targetObjectKey)
+    : assertAbyObjectKey(targetObjectKey, config.audioPrefix);
+  const bucket = config.WASABI_BUCKET!;
+  const physicalTarget = toWasabiKey(targetKey, config.wasabiRootPrefix);
+  let exists = false;
+  try {
+    await wasabiClient().send(new HeadObjectCommand({ Bucket: bucket, Key: physicalTarget }));
+    exists = true;
+  } catch (error) {
+    if (!(typeof error === 'object' && error && '$metadata' in error && (error as { $metadata?: { httpStatusCode?: number } }).$metadata?.httpStatusCode === 404)) throw error;
+  }
+  if (!exists || overwrite) {
+    await wasabiClient().send(new CopyObjectCommand({
+      Bucket: bucket,
+      Key: physicalTarget,
+      CopySource: encodeURIComponent(`${bucket}/${toWasabiKey(sourceKey, config.wasabiRootPrefix)}`),
+      MetadataDirective: 'COPY'
+    }));
+  }
+  return { created: !exists, overwritten: exists && overwrite, sourceObjectKey: sourceKey, targetObjectKey: targetKey };
 }
 
 export async function deleteWasabiCanonicalObject(objectKey: string): Promise<void> {
@@ -202,6 +256,19 @@ export async function sourceVideoPlaybackUrl(objectKey: string): Promise<{ url: 
     Bucket: config.WASABI_BUCKET!,
     Key: toWasabiKey(key, config.wasabiRootPrefix),
     ResponseContentDisposition: `inline; filename="${key.split('/').at(-1)?.replace(/["\r\n]/g, '_') ?? 'video'}"`
+  }), { expiresIn });
+  return { url, expiresAt: new Date(Date.now() + expiresIn * 1000).toISOString() };
+}
+
+export async function supplementalArtifactUrl(objectKey: string, contentType?: string): Promise<{ url: string; expiresAt: string }> {
+  const config = readConfig();
+  const key = assertSupplementalObjectKey(objectKey);
+  const expiresIn = config.ABY_PRESIGNED_URL_TTL_SECONDS;
+  const url = await getSignedUrl(wasabiClient(), new GetObjectCommand({
+    Bucket: config.WASABI_BUCKET!,
+    Key: toWasabiKey(key, config.wasabiRootPrefix),
+    ...(contentType ? { ResponseContentType: contentType } : {}),
+    ResponseContentDisposition: `inline; filename="${key.split('/').at(-1)?.replace(/["\r\n]/g, '_') ?? 'supplement'}"`
   }), { expiresIn });
   return { url, expiresAt: new Date(Date.now() + expiresIn * 1000).toISOString() };
 }
@@ -271,6 +338,48 @@ export async function listWasabiSiblingKeys(objectKey: string): Promise<string[]
     continuationToken = response.IsTruncated ? response.NextContinuationToken : undefined;
   } while (continuationToken);
   return keys.sort((left, right) => left.localeCompare(right, undefined, { numeric: true }));
+}
+
+export async function listWasabiSupplementalFiles(objectKey: string, parentLevel = 0): Promise<Array<{
+  objectKey: string; sizeBytes: number; contentType: string; modifiedAt?: string;
+}>> {
+  const config = readConfig();
+  const anchor = assertSupplementalObjectKey(objectKey);
+  let directory = dirname(anchor);
+  for (let level = 0; level < parentLevel; level += 1) {
+    const next = dirname(directory);
+    if (next === '.' || next === directory || !(`${next}/`).startsWith(config.sourceAudioPrefix) && !(`${next}/`).startsWith(config.audioPrefix)) {
+      throw new AbyError('supplemental_parent_outside_boundary', 'Cannot browse above the audio source boundary', 400);
+    }
+    directory = next;
+  }
+  const root = config.wasabiRootPrefix ? normalizeObjectKey(config.wasabiRootPrefix).replace(/\/+$/, '') + '/' : '';
+  const objects: _Object[] = [];
+  let continuationToken: string | undefined;
+  do {
+    const response = await wasabiClient().send(new ListObjectsV2Command({
+      Bucket: config.WASABI_BUCKET!, Prefix: `${root}${directory}/`, ContinuationToken: continuationToken
+    }));
+    objects.push(...(response.Contents ?? []));
+    continuationToken = response.IsTruncated ? response.NextContinuationToken : undefined;
+  } while (continuationToken);
+  const contentTypes: Record<string, string> = {
+    '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png', '.webp': 'image/webp',
+    '.tif': 'image/tiff', '.tiff': 'image/tiff', '.pdf': 'application/pdf', '.eps': 'application/postscript'
+  };
+  return objects.flatMap((object) => {
+    if (!object.Key || object.Key.endsWith('/')) return [];
+    const logicalKey = root && object.Key.startsWith(root) ? object.Key.slice(root.length) : object.Key;
+    if (dirname(logicalKey) !== directory || logicalKey === anchor) return [];
+    const contentType = contentTypes[extname(logicalKey).toLocaleLowerCase()];
+    if (!contentType) return [];
+    return [{
+      objectKey: logicalKey,
+      sizeBytes: Number(object.Size ?? 0),
+      contentType,
+      ...(object.LastModified ? { modifiedAt: object.LastModified.toISOString() } : {})
+    }];
+  }).sort((left, right) => left.objectKey.localeCompare(right.objectKey, undefined, { numeric: true }));
 }
 
 export async function listWasabiSidecarSubtitles(objectKey: string): Promise<Array<{ objectKey: string; sizeBytes: number }>> {

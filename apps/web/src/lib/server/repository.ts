@@ -248,7 +248,11 @@ export class MemoryAbyRepository implements AbyRepository {
       const asset: Asset = {
         id: randomUUID(), ownerId, workId, recordingId: randomUUID(), ...(albumId ? { albumId } : {}), provider: preview.provider,
         ...(preview.bucket ? { bucket: preview.bucket } : {}), objectKey: track.objectKey,
-        originalFilename: track.originalFilename, checksumSha256: track.checksumSha256,
+        originalFilename: track.originalFilename,
+        originalObjectKey: ('sourceObjectKey' in track ? track.sourceObjectKey : undefined)
+          ?? (typeof preview.provenance.parameters?.sourceObjectKey === 'string' ? preview.provenance.parameters.sourceObjectKey : track.objectKey),
+        originalDirectory: preview.originalDirectory,
+        checksumSha256: track.checksumSha256,
         technicalMetadata: track.technicalMetadata,
         canonicalMetadata: { 
           ...preview.candidateMetadata, 
@@ -508,7 +512,10 @@ function mapAsset(row: any): Asset {
     id: row.id, ownerId: row.owner_id, workId: row.work_id, recordingId: row.recording_id,
     ...(row.album_id ? { albumId: row.album_id } : {}),
     provider: row.provider, ...(row.bucket ? { bucket: row.bucket } : {}), objectKey: row.object_key,
-    originalFilename: row.original_filename, checksumSha256: row.checksum_sha256,
+    originalFilename: row.original_filename,
+    ...(row.original_object_key ? { originalObjectKey: row.original_object_key } : {}),
+    ...(row.original_directory ? { originalDirectory: row.original_directory } : {}),
+    checksumSha256: row.checksum_sha256,
     technicalMetadata: row.technical_metadata, canonicalMetadata: row.canonical_metadata,
     provenance: row.provenance, createdAt: new Date(row.created_at).toISOString()
   };
@@ -804,7 +811,8 @@ export class PostgresAbyRepository implements AbyRepository {
         const createdAsset = {
           id: assetId, ownerId, workId, recordingId, ...(albumId ? { albumId } : {}), provider: preview.provider,
           ...(preview.bucket ? { bucket: preview.bucket } : {}), objectKey: track.objectKey,
-          originalFilename: track.originalFilename, checksumSha256: track.checksumSha256,
+          originalFilename: track.originalFilename, originalObjectKey, originalDirectory: preview.original_directory,
+          checksumSha256: track.checksumSha256,
           technicalMetadata: track.technicalMetadata, canonicalMetadata, provenance, createdAt: now
         };
         if (!firstAssetId) firstAssetId = assetId;

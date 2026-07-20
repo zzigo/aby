@@ -25,6 +25,7 @@
   let sourcesOpen = $state(false);
   let inspection = $state<Inspection | null>(null);
   let operations = $state<StorageOperation[]>([]);
+  let operationDestinations = $state<Record<string, string>>({});
   let committed = $state<AvCatalogItem | null>(null);
   let candidates = $state<Record<Service, AvMetadataCandidate[]>>({ tmdb: [], wikidata: [], 'internet-archive': [] });
   let serviceState = $state<Record<Service, string>>({ tmdb: 'READY', wikidata: 'READY', 'internet-archive': 'READY' });
@@ -159,7 +160,36 @@
     finally { busy = false; }
   }
 
-  async function loadOperations() { try { const body=await jsonRequest('/api/av/operations'); operations=body.operations??[]; } catch {/* status belongs to the active editor action */} }
+  async function loadOperations() {
+    try {
+      const body = await jsonRequest('/api/av/operations');
+      operations = body.operations ?? [];
+      const liveIds = new Set(operations.map((operation) => operation.id));
+      operationDestinations = Object.fromEntries(operations.map((operation) => [
+        operation.id,
+        operationDestinations[operation.id] && liveIds.has(operation.id)
+          ? operationDestinations[operation.id]
+          : operation.destinationObjectKey
+      ]));
+    } catch {/* status belongs to the active editor action */}
+  }
+  async function saveOperationDestination(operation: StorageOperation) {
+    const destinationObjectKey = operationDestinations[operation.id]?.trim();
+    if (!destinationObjectKey || destinationObjectKey === operation.destinationObjectKey) return;
+    busy = true;
+    status = 'Validating the final AV destination…';
+    try {
+      const body = await jsonRequest(`/api/av/operations/${operation.id}`, {
+        method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ destinationObjectKey })
+      });
+      operations = operations.map((candidate) => candidate.id === operation.id ? body.operation : candidate);
+      operationDestinations[operation.id] = body.operation.destinationObjectKey;
+      if (committed?.id === body.item.id) committed = body.item;
+      status = `Final destination saved: ${body.operation.destinationObjectKey}`;
+    } catch (error) {
+      status = error instanceof Error ? error.message : 'Destination could not be saved';
+    } finally { busy = false; }
+  }
   async function importReference() {
     if(!referenceUrl.trim()) return;
     busy=true; status='Importing bounded metadata from the reference page…';
@@ -235,7 +265,7 @@
 
     <section class="subtitle-config"><header><div><span>TEXT</span><h2>Subtitle providers</h2></div><small>VIEW combines embedded tracks, neighboring .srt files and OpenSubtitles.</small></header><div>{#each subtitleProviders as provider (provider.id)}<article><strong>{provider.label}</strong><span class:ready={provider.state==='READY'}>{provider.state}</span><p>{provider.detail}</p></article>{/each}</div><form onsubmit={(event)=>{event.preventDefault();void saveSubtitleSettings();}}><label>OPENSUBTITLES LANGUAGES · ISO CODES<input bind:value={subtitleLanguagesText} type="text" placeholder="en, es, fr, de" /></label><label class="check"><input type="checkbox" bind:checked={includeHearingImpaired}/> INCLUDE SDH / HEARING IMPAIRED</label><button type="submit">SAVE LANGUAGE FILTER</button></form></section>
 
-    <section class="operation-thread"><header><div><span>STORAGE</span><h2>Deferred operation thread</h2></div><small>origin · destination · state · size · progress · speed · ETA</small></header>{#if operations.length===0}<p class="empty">No AV storage operations.</p>{/if}{#each operations as operation (operation.id)}<article><div><strong>{operation.sourceObjectKey}</strong><span>→ {operation.destinationObjectKey}</span></div><div class="metrics"><span>{operation.state}</span><span>{formatBytes(operation.sizeBytes)}</span><span>{operationProgress(operation).toFixed(1)}%</span><span>{formatBytes(operation.speedBytesPerSecond)}/s</span><span>ETA {operation.etaSeconds ?? '—'}</span></div><i><b style={`width:${operationProgress(operation)}%`}></b></i><footer><small>{operation.beaconAt ? `beacon ${new Date(operation.beaconAt).toLocaleTimeString()}` : 'not started'}</small><button onclick={() => execute(operation)} disabled={operation.state==='running'||operation.state==='succeeded'}>EXECUTE</button></footer></article>{/each}</section>
+    <section class="operation-thread"><header><div><span>STORAGE</span><h2>Deferred operation thread</h2></div><small>origin · editable destination · state · size · progress · speed · ETA</small></header>{#if operations.length===0}<p class="empty">No AV storage operations.</p>{/if}{#each operations as operation (operation.id)}<article><div><strong>{operation.sourceObjectKey}</strong>{#if operation.state==='pending'}<label>FINAL DESTINATION<input bind:value={operationDestinations[operation.id]} spellcheck="false" /><button onclick={() => saveOperationDestination(operation)} disabled={busy || !operationDestinations[operation.id]?.trim() || operationDestinations[operation.id]?.trim()===operation.destinationObjectKey}>SAVE DESTINATION</button></label>{:else}<span>→ {operation.destinationObjectKey}</span>{/if}</div><div class="metrics"><span>{operation.state}</span><span>{formatBytes(operation.sizeBytes)}</span><span>{operationProgress(operation).toFixed(1)}%</span><span>{formatBytes(operation.speedBytesPerSecond)}/s</span><span>ETA {operation.etaSeconds ?? '—'}</span></div><i><b style={`width:${operationProgress(operation)}%`}></b></i><footer><small>{operation.beaconAt ? `beacon ${new Date(operation.beaconAt).toLocaleTimeString()}` : 'not started'}</small><button onclick={() => execute(operation)} disabled={busy||operation.state==='running'||operation.state==='succeeded'||operationDestinations[operation.id]?.trim()!==operation.destinationObjectKey}>EXECUTE</button></footer></article>{/each}</section>
   {/if}
 </main>
 
@@ -246,4 +276,5 @@
   .credit-editor{border:1px solid var(--line)}.credit-editor>header{padding:8px 10px;display:flex;justify-content:space-between;align-items:center;background:#111310}.credit-editor>header strong{color:var(--muted);font:9.2px ui-monospace,monospace}.credit-editor button{border:1px solid var(--line);background:transparent;color:var(--signal)}.credit-editor>div{padding:6px;display:grid;grid-template-columns:1.2fr .8fr 1fr 32px;gap:6px;border-top:1px solid var(--line)}.credit-editor>div input,.credit-editor>div select{padding:8px}.subtitle-config{margin-top:18px;background:var(--surface)}.subtitle-config>header{padding:18px;display:flex;justify-content:space-between;align-items:baseline;border-bottom:1px solid var(--line)}.subtitle-config>header>div{display:flex;gap:14px;align-items:baseline}.subtitle-config>header small{color:var(--muted);font:9.2px ui-monospace,monospace}.subtitle-config>div{display:grid;grid-template-columns:repeat(3,1fr)}.subtitle-config article{padding:14px;border-right:1px solid var(--line)}.subtitle-config article span{float:right;color:var(--muted);font:9.2px ui-monospace,monospace}.subtitle-config article span.ready{color:var(--signal)}.subtitle-config article p{margin:8px 0 0;color:var(--muted);font:10.35px/1.4 ui-monospace,monospace}@media(max-width:700px){.credit-editor>div,.subtitle-config>div{grid-template-columns:1fr}.credit-editor>div button{min-height:34px}}
   .reference-import{display:grid;grid-template-columns:1fr auto;gap:8px;align-items:end}.reference-import button{min-height:36px;border:1px solid var(--signal);background:transparent;color:var(--signal);font:9.2px ui-monospace,monospace}
   .subtitle-config>form{padding:14px;display:grid;grid-template-columns:minmax(260px,1fr) auto auto;gap:12px;align-items:end;border-top:1px solid var(--line)}.subtitle-config>form label{display:grid;gap:6px;color:var(--muted);font:9.2px ui-monospace,monospace}.subtitle-config>form input[type="text"]{min-height:38px;padding:0 10px;border:1px solid var(--line);background:#090a09;color:#fff}.subtitle-config>form .check{display:flex;min-height:38px;align-items:center;gap:8px}.subtitle-config>form button{min-height:38px;padding:0 14px;border:1px solid var(--signal);background:transparent;color:var(--signal);font:9.2px ui-monospace,monospace}@media(max-width:700px){.subtitle-config>form{grid-template-columns:1fr}}
+  .operation-thread article label{margin-top:7px;display:grid;grid-template-columns:minmax(0,1fr) auto;gap:7px;color:var(--muted);font:9.2px ui-monospace,monospace}.operation-thread article label input{min-width:0;padding:9px;border:1px solid var(--line);background:#090a09;color:#fff;font:10.35px ui-monospace,monospace}.operation-thread article label button{padding:0 11px;border:1px solid var(--signal);background:transparent;color:var(--signal);font:9.2px ui-monospace,monospace}.operation-thread button:disabled{opacity:.35}
 </style>

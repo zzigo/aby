@@ -21,6 +21,7 @@ export interface AvRepository {
   listOperations(ownerId: string): Promise<StorageOperation[]>;
   getOperation(ownerId: string, id: string): Promise<StorageOperation | null>;
   updateOperation(ownerId: string, id: string, patch: OperationPatch): Promise<StorageOperation>;
+  updatePendingDestination(ownerId: string, id: string, destinationObjectKey: string): Promise<{ item: AvCatalogItem; operation: StorageOperation }>;
   createCapture(ownerId: string, input: CaptureCreate): Promise<Capture>;
   listCaptures(ownerId: string): Promise<Capture[]>;
   getCaptureByToken(token: string): Promise<Capture | null>;
@@ -78,6 +79,31 @@ export class MemoryAvRepository implements AvRepository {
     const updated = { ...operation, ...patch };
     this.#operations.set(id, updated);
     return structuredClone(updated);
+  }
+  async updatePendingDestination(ownerId: string, id: string, destinationObjectKey: string) {
+    const operation = this.#operations.get(id);
+    if (!operation || operation.ownerId !== ownerId) throw new AbyError('operation_not_found', 'Storage operation not found', 404);
+    if (operation.state !== 'pending') throw new AbyError('operation_destination_locked', 'Destination can only be edited while the operation is pending', 409);
+    if ([...this.#operations.values()].some((candidate) => candidate.id !== id && candidate.ownerId === ownerId && candidate.destinationObjectKey === destinationObjectKey)) {
+      throw new AbyError('av_destination_conflict', 'Another AV operation already uses this destination', 409);
+    }
+    const item = this.#items.get(operation.avItemId);
+    if (!item || item.ownerId !== ownerId) throw new AbyError('av_item_not_found', 'AV item not found', 404);
+    const directory = destinationObjectKey.slice(0, destinationObjectKey.lastIndexOf('/'));
+    const technicalMetadata = {
+      ...item.technicalMetadata,
+      ...(item.technicalMetadata.sidecarSubtitles ? {
+        sidecarSubtitles: item.technicalMetadata.sidecarSubtitles.map((subtitle) => ({
+          ...subtitle,
+          destinationObjectKey: `${directory}/${subtitle.sourceObjectKey.split('/').at(-1)}`
+        }))
+      } : {})
+    };
+    const updatedItem = { ...item, destinationObjectKey, technicalMetadata, updatedAt: now() };
+    const updatedOperation = { ...operation, destinationObjectKey };
+    this.#items.set(item.id, structuredClone(updatedItem));
+    this.#operations.set(id, structuredClone(updatedOperation));
+    return { item: structuredClone(updatedItem), operation: structuredClone(updatedOperation) };
   }
   async createCapture(ownerId: string, input: CaptureCreate) {
     if (input.avItemId && !await this.getItem(ownerId, input.avItemId)) throw new AbyError('av_item_not_found', 'AV item not found', 404);
@@ -199,6 +225,45 @@ export class PostgresAvRepository implements AvRepository {
       [next.state, next.sizeBytes, next.transferredBytes, next.speedBytesPerSecond, next.etaSeconds ?? null, next.beaconAt ?? null, next.error ?? null, next.startedAt ?? null, next.finishedAt ?? null, id, ownerId]
     );
     return mapOperation(result.rows[0]);
+  }
+  async updatePendingDestination(ownerId: string, id: string, destinationObjectKey: string) {
+    const client = await this.#pool.connect();
+    try {
+      await client.query('BEGIN');
+      const found = await client.query(
+        `SELECT so.*,i.technical_metadata
+         FROM aby.storage_operations so JOIN aby.av_catalog_items i ON i.id=so.av_item_id
+         WHERE so.id=$1 AND so.owner_id=$2 FOR UPDATE`,
+        [id, ownerId]
+      );
+      const row = found.rows[0];
+      if (!row) throw new AbyError('operation_not_found', 'Storage operation not found', 404);
+      if (row.state !== 'pending') throw new AbyError('operation_destination_locked', 'Destination can only be edited while the operation is pending', 409);
+      const directory = destinationObjectKey.slice(0, destinationObjectKey.lastIndexOf('/'));
+      const technicalMetadata: TechnicalMetadata = {
+        ...row.technical_metadata,
+        ...(row.technical_metadata.sidecarSubtitles ? {
+          sidecarSubtitles: row.technical_metadata.sidecarSubtitles.map((subtitle: NonNullable<TechnicalMetadata['sidecarSubtitles']>[number]) => ({
+            ...subtitle,
+            destinationObjectKey: `${directory}/${subtitle.sourceObjectKey.split('/').at(-1)}`
+          }))
+        } : {})
+      };
+      const itemResult = await client.query(
+        'UPDATE aby.av_catalog_items SET destination_object_key=$1,technical_metadata=$2,updated_at=now() WHERE id=$3 AND owner_id=$4 RETURNING *',
+        [destinationObjectKey, postgresJson(technicalMetadata), row.av_item_id, ownerId]
+      );
+      const operationResult = await client.query(
+        'UPDATE aby.storage_operations SET destination_object_key=$1 WHERE id=$2 AND owner_id=$3 RETURNING *',
+        [destinationObjectKey, id, ownerId]
+      );
+      await client.query('COMMIT');
+      return { item: mapItem(itemResult.rows[0]), operation: mapOperation(operationResult.rows[0]) };
+    } catch (error: any) {
+      await client.query('ROLLBACK');
+      if (error?.code === '23505') throw new AbyError('av_destination_conflict', 'Another AV operation already uses this destination', 409);
+      throw error;
+    } finally { client.release(); }
   }
   async createCapture(ownerId: string, input: CaptureCreate) {
     const result = await this.#pool.query(
