@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import type { CatalogItem } from '@zztt/aby-domain';
 import {
   audioDestinationPrefix, audioPathAnomalies, audioTargetObjectKey,
-  validateAudioDestinationPrefix
+  composerSurnameSlug, validateAudioDestinationPrefix
 } from '../src/lib/server/media-path';
 
 function item(objectKey: string): CatalogItem {
@@ -37,5 +37,11 @@ describe('canonical media paths', () => {
     expect(audioPathAnomalies('aby/aud/19/schubert/Winterreise-I/Winterreise-I/01.mp3', '19'))
       .toContain('redundant album folder layer');
     expect(audioPathAnomalies('aby/aud/19/schubert/Winterreise-I/01.mp3', '19')).toEqual([]);
+  });
+
+  test('composer folders use only the lowercase surname', () => {
+    expect(composerSurnameSlug('Johann Sebastian Bach')).toBe('bach');
+    expect(composerSurnameSlug('Jean-Luc Barrière')).toBe('barriere');
+    expect(composerSurnameSlug('Bach, Johann Sebastian')).toBe('bach');
   });
 });

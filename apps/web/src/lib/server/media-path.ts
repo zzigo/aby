@@ -34,6 +34,18 @@ export function validateEntitySlug(value: string): string {
   return clean;
 }
 
+export function composerSurnameSlug(value: string): string {
+  const primaryName = value.split(/\s*(?:;|&|\band\b|\by\b)\s*/iu)[0]?.trim() ?? '';
+  const surname = primaryName.includes(',')
+    ? primaryName.split(',')[0]!.trim()
+    : primaryName.split(/\s+/).filter(Boolean).at(-1) ?? '';
+  const slug = surname.normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLocaleLowerCase()
+    .replace(/[^a-z0-9]+/g, '');
+  return validateEntitySlug(slug);
+}
+
 export function audioDestinationPrefix(input: {
   collectionCode: string;
   entitySlug: string;

@@ -3,14 +3,10 @@ import { api, ownerFor } from '$lib/server/errors';
 import { getAvRepository } from '$lib/server/av-repository';
 import { getRepository } from '$lib/server/repository';
 import { getMediaRelocationRepository } from '$lib/server/media-relocation-repository';
-import { audioDestinationPrefix, audioPathAnomalies, currentAudioPrefix } from '$lib/server/media-path';
+import { audioDestinationPrefix, audioPathAnomalies, composerSurnameSlug, currentAudioPrefix } from '$lib/server/media-path';
 import { proposeAvDestination } from '$lib/server/av-tree';
 import type { CatalogItem } from '@zztt/aby-domain';
 import type { RequestHandler } from './$types';
-
-function slug(value: string) {
-  return value.normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '').slice(0, 80) || 'unknown';
-}
 
 export const GET: RequestHandler = (event) => api('storage.board', async () => {
   const ownerId = ownerFor(event);
@@ -33,7 +29,9 @@ export const GET: RequestHandler = (event) => api('storage.board', async () => {
     const first = items[0]!;
     const metadata = first.asset.canonicalMetadata;
     const collectionCode = metadata.collectionCode || first.asset.objectKey.split('/')[2] || 'unsorted';
-    const entitySlug = metadata.entitySlug || slug(first.creator || first.albumArtist || 'unknown');
+    const entitySlug = first.creator
+      ? composerSurnameSlug(first.creator)
+      : metadata.entitySlug || composerSurnameSlug(first.albumArtist || 'unknown');
     const container = metadata.albumSet?.title || first.albumTitle || first.workTitle;
     const destinationPrefix = audioDestinationPrefix({ collectionCode, entitySlug, container });
     const anomalies = [...new Set(items.flatMap((item) => audioPathAnomalies(item.asset.objectKey, collectionCode)))];

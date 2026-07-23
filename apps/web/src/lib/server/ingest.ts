@@ -14,6 +14,7 @@ import type { AbyRepository } from './repository';
 import { assertSourceObjectKey, downloadWasabiSourceObject, headWasabiSourceObject, normalizeObjectKey, listWasabiSiblingKeys } from './storage';
 import { parseTrackFilename } from './track-title';
 import { repairLegacyDiacritics } from './text-repair';
+import { composerSurnameSlug } from './media-path';
 
 function pathSegment(value: string): string {
   const segment = value.normalize('NFC').replace(/\p{Cc}/gu, '').replaceAll('/', '／').trim();
@@ -114,12 +115,7 @@ export async function inspectWasabiSource(
       ? creator
       : (embeddedArtist && !embeddedArtist.includes('\uFFFD') ? embeddedArtist : creator);
     const workTitle = repairLegacyDiacritics(input.workTitle);
-    const entitySlug = identification?.artistName
-      ? identification.artistName.normalize('NFKD')
-          .replace(/[\u0300-\u036f]/g, '')
-          .toLowerCase()
-          .replace(/[^a-z0-9]+/g, '')
-      : input.entitySlug;
+    const entitySlug = composerSurnameSlug(input.creatorDisplay);
 
     const wikidata = creator ? await fetchWikidataEntity(creator) : null;
     const rawAlbumTitle = identification?.releaseTitle || embeddedAlbumTitle
