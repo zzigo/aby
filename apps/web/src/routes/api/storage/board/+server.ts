@@ -39,14 +39,15 @@ export const GET: RequestHandler = (event) => api('storage.board', async () => {
     const bookletCount = new Set(items.flatMap((item) =>
       (item.asset.canonicalMetadata.bookletPages ?? []).map((page) => page.objectKey)
     )).size;
+    const operation = latest.get(`audio:${first.albumId ? 'album' : 'work'}:${id}`) ?? null;
     return {
       mediaKind: 'audio', entityType: first.albumId ? 'album' : 'work', entityId: id,
       title: first.albumTitle || first.workTitle, setTitle: metadata.albumSet?.title,
       collectionCode, entitySlug, container, sourcePrefix: currentAudioPrefix(first.asset.objectKey),
-      destinationPrefix, fileCount: items.length + bookletCount,
+      destinationPrefix: operation?.destinationPrefix ?? destinationPrefix, fileCount: items.length + bookletCount,
       sizeBytes: items.reduce((total, item) => total + (item.asset.technicalMetadata.sizeBytes ?? 0), 0),
       anomalies: [...new Set(anomalies)],
-      operation: latest.get(`audio:${first.albumId ? 'album' : 'work'}:${id}`) ?? null
+      operation
     };
   });
   const video = videos.map((item) => {
@@ -54,14 +55,15 @@ export const GET: RequestHandler = (event) => api('storage.board', async () => {
       sourceObjectKey: item.sourceObjectKey, title: item.title, year: item.year,
       strategy: item.treeStrategy, treeValue: item.treeValue
     });
+    const operation = latest.get(`video:av_item:${item.id}`) ?? null;
     return {
       mediaKind: 'video', entityType: 'av_item', entityId: item.id, title: item.title,
       collectionCode: item.treeStrategy, entitySlug: item.treeValue, container: basename(proposal),
-      sourcePrefix: dirname(item.sourceObjectKey), destinationPrefix: proposal,
+      sourcePrefix: dirname(item.sourceObjectKey), destinationPrefix: operation?.destinationPrefix ?? proposal,
       fileCount: 1 + (item.technicalMetadata.sidecarSubtitles?.length ?? 0),
       sizeBytes: item.technicalMetadata.sizeBytes + (item.technicalMetadata.sidecarSubtitles ?? []).reduce((total, file) => total + file.sizeBytes, 0),
       anomalies: item.destinationObjectKey === proposal ? [] : ['destination differs from canonical proposal'],
-      operation: latest.get(`video:av_item:${item.id}`) ?? null
+      operation
     };
   });
   const cards = [...audio, ...video].sort((left, right) => left.title.localeCompare(right.title));
@@ -72,7 +74,6 @@ export const GET: RequestHandler = (event) => api('storage.board', async () => {
       total: cards.length, anomalies: cards.filter((card) => card.anomalies.length).length,
       active: operations.filter((operation) => ['copying', 'verifying', 'retiring'].includes(operation.state)).length,
       awaitingRetirement: operations.filter((operation) => operation.state === 'retirement_pending').length
-    },
-    cloneUrl: 'https://clone.zztt.org/'
+    }
   };
 });

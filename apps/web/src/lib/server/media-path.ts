@@ -58,19 +58,26 @@ export function audioDestinationPrefix(input: {
 }
 
 export function validateAudioDestinationPrefix(value: string): string {
-  const key = normalizeObjectKey(value).replace(/\/+$/, '');
-  const parts = key.split('/');
-  if (parts.length !== 5 || parts[0] !== 'aby' || parts[1] !== 'aud') {
+  const parts = normalizeObjectKey(value.trim()).replace(/\/+$/, '').split('/');
+  if (parts[0]?.toLocaleLowerCase() !== 'aby' || !['aud', 'audio'].includes(parts[1]?.toLocaleLowerCase() ?? '') || parts.length < 5) {
     throw new AbyError(
       'invalid_audio_destination',
-      'Audio destinations use aby/aud/<collection>/<entity>/<album-or-set>',
+      'Audio destinations use aby/aud/<collection>/<composer-surname>/<album-or-set>',
       400
     );
   }
-  validateCollectionCode(parts[2]!);
-  validateEntitySlug(parts[3]!);
-  humanPathSegment(parts[4]!);
-  return key;
+  const collectionCode = validateCollectionCode(parts[2]!);
+  const entitySlug = validateEntitySlug(parts[3]!.toLocaleLowerCase());
+  const tail = [...parts.slice(4)];
+  if (tail.length > 1 && /\.(?:mp3|flac|wav|aiff?|m4a|ogg|opus)$/i.test(tail.at(-1)!)) tail.pop();
+  if (!tail.length) {
+    throw new AbyError('invalid_audio_destination', 'Add an album or set folder after the composer surname', 400);
+  }
+  return audioDestinationPrefix({
+    collectionCode,
+    entitySlug,
+    container: tail.join('／')
+  });
 }
 
 export function canonicalTrackFilename(item: CatalogItem): string {

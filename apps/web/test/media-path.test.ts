@@ -31,6 +31,8 @@ describe('canonical media paths', () => {
     expect(audioTargetObjectKey(prefix, item('aby/aud/19/schubert/old/old/01.mp3')))
       .toBe('aby/aud/19/schubert/Winterreise-I/01-Gute-Nacht.mp3');
     expect(validateAudioDestinationPrefix(prefix)).toBe(prefix);
+    expect(validateAudioDestinationPrefix('/aby/audio/19/Schubert/Winterreise I/01-Gute Nacht.mp3'))
+      .toBe('aby/aud/19/schubert/Winterreise-I');
   });
 
   test('the sanitizer identifies the legacy extra album layer', () => {
