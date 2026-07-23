@@ -16,6 +16,7 @@
       <a class:active={page.url.pathname.startsWith('/view')} href={resolve('/view')}>View</a>
       <a class:active={page.url.pathname.startsWith('/gallery')} href={resolve('/gallery')}>Gallery</a>
       <a class:active={page.url.pathname.startsWith('/workspace')} href={resolve('/workspace')}>Workspace</a>
+      <a class:active={page.url.pathname.startsWith('/storage')} href={resolve('/storage')}>Storage</a>
       <a class:active={page.url.pathname.startsWith('/inspect')} href={resolve('/inspect')}>Inspect</a>
     </nav>
   </header>

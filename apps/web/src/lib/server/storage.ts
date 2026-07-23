@@ -1,6 +1,7 @@
 import { CopyObjectCommand, DeleteObjectCommand, GetObjectCommand, HeadObjectCommand, PutObjectCommand, S3Client, ListObjectsV2Command, type _Object } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { createReadStream, createWriteStream } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { stat } from 'node:fs/promises';
 import { dirname, extname } from 'node:path';
 import { Readable } from 'node:stream';
@@ -200,6 +201,45 @@ export async function copyWasabiSupplementalObject(sourceObjectKey: string, targ
 export async function deleteWasabiCanonicalObject(objectKey: string): Promise<void> {
   const config = readConfig();
   const key = assertAbyObjectKey(objectKey, config.storagePrefix);
+  await wasabiClient().send(new DeleteObjectCommand({
+    Bucket: config.WASABI_BUCKET!,
+    Key: toWasabiKey(key, config.wasabiRootPrefix)
+  }));
+}
+
+function assertRelocationObjectKey(value: string): string {
+  const config = readConfig();
+  const key = normalizeObjectKey(value);
+  const prefixes = [config.storagePrefix, config.sourceAudioPrefix, config.sourceVideoPrefix];
+  if (!key || key.split('/').some((part) => !part || part === '.' || part === '..') || !prefixes.some((prefix) => key.startsWith(prefix))) {
+    throw new AbyError('invalid_relocation_key', 'Relocation objects must remain inside an Aby source or canonical boundary', 400);
+  }
+  return key;
+}
+
+export async function checksumWasabiRelocationObject(objectKey: string): Promise<{ checksumSha256: string; sizeBytes: number }> {
+  const config = readConfig();
+  const key = assertRelocationObjectKey(objectKey);
+  const response = await wasabiClient().send(new GetObjectCommand({
+    Bucket: config.WASABI_BUCKET!,
+    Key: toWasabiKey(key, config.wasabiRootPrefix)
+  }));
+  if (!(response.Body instanceof Readable)) {
+    throw new AbyError('relocation_stream_unavailable', 'Wasabi did not return a readable relocation stream', 502);
+  }
+  const hash = createHash('sha256');
+  let sizeBytes = 0;
+  for await (const chunk of response.Body) {
+    const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    hash.update(bytes);
+    sizeBytes += bytes.byteLength;
+  }
+  return { checksumSha256: hash.digest('hex'), sizeBytes };
+}
+
+export async function deleteWasabiRelocationSource(objectKey: string): Promise<void> {
+  const config = readConfig();
+  const key = assertRelocationObjectKey(objectKey);
   await wasabiClient().send(new DeleteObjectCommand({
     Bucket: config.WASABI_BUCKET!,
     Key: toWasabiKey(key, config.wasabiRootPrefix)

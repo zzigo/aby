@@ -12,7 +12,7 @@ function remotePath(root: string, objectKey: string): string {
   return `${root.replace(/\/+$/, '')}/${objectKey.replace(/^\/+/, '')}`;
 }
 
-function progressFromLine(line: string) {
+export function progressFromLine(line: string) {
   try {
     const parsed = JSON.parse(line) as Record<string, unknown>;
     const stats = (parsed.stats && typeof parsed.stats === 'object' ? parsed.stats : parsed) as Record<string, unknown>;
@@ -27,7 +27,7 @@ function progressFromLine(line: string) {
   } catch { return {}; }
 }
 
-function copyOne(source: string, destination: string, completedBytes: number, observe: (progress: ReturnType<typeof progressFromLine>) => void): Promise<void> {
+export function copyOne(source: string, destination: string, completedBytes: number, observe: (progress: ReturnType<typeof progressFromLine>) => void): Promise<void> {
   const config = readConfig();
   return new Promise((resolve, reject) => {
     const child = spawn(config.RCLONE_PATH, [
