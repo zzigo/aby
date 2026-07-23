@@ -148,6 +148,28 @@ export class MediaRelocationRepository {
     return result.rows[0] ? mapOperation(result.rows[0]) : null;
   }
 
+  async clearUntouchedStopped(ownerId: string): Promise<{ deleted: number; preserved: number }> {
+    const deleted = await this.#pool.query(
+      `DELETE FROM aby.media_relocation_operations
+       WHERE owner_id=$1 AND (
+         state='draft' OR (
+           state='failed' AND transferred_bytes=0
+           AND NOT EXISTS (
+             SELECT 1 FROM jsonb_array_elements(files) AS file
+             WHERE file->>'state' IN ('copied','verifying','verified','retired')
+           )
+         )
+       ) RETURNING id`,
+      [ownerId]
+    );
+    const preserved = await this.#pool.query(
+      `SELECT count(*)::int AS count FROM aby.media_relocation_operations
+       WHERE owner_id=$1 AND state='failed'`,
+      [ownerId]
+    );
+    return { deleted: deleted.rowCount ?? 0, preserved: Number(preserved.rows[0]?.count ?? 0) };
+  }
+
   async update(ownerId: string, id: string, patch: OperationPatch): Promise<MediaRelocationOperation> {
     const current = await this.get(ownerId, id);
     if (!current) throw new AbyError('relocation_not_found', 'Storage relocation not found', 404);

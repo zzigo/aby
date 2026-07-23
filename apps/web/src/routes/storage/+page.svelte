@@ -88,6 +88,16 @@
       if (!silent) message=error instanceof Error?error.message:'Storage board failed';
     } finally { loading=false; }
   }
+  async function refreshAndClear() {
+    message='Clearing untouched stopped plans and refreshing storage…';
+    try {
+      const result=await json('/api/storage/operations',{method:'DELETE'});
+      selected=null; await load(true);
+      message=`Refreshed. ${result.deleted} stopped plans cleared${result.preserved?`; ${result.preserved} partial failures preserved for review`:''}.`;
+    } catch(error) {
+      message=error instanceof Error?error.message:'Refresh failed';
+    }
+  }
   async function plan(card:Card) {
     message=`Planning ${card.title}…`;
     try {
@@ -157,7 +167,7 @@
     <input type="search" bind:value={search} placeholder="SEARCH TITLE · PATH · ENTITY" />
     <label><input type="checkbox" bind:checked={anomaliesOnly} /> ANOMALIES / OPERATIONS ONLY</label>
     <button class="bulk" onclick={executeApproved} disabled={!approvedPlans.length||batchBusy}>COPY + VERIFY {approvedPlans.length} APPROVED</button>
-    <button onclick={()=>load()}>REFRESH</button>
+    <button onclick={refreshAndClear}>REFRESH · CLEAR STOPPED</button>
   </header>
 
   <section class="protocol">
@@ -178,7 +188,7 @@
                 <div class="path"><span>FROM</span><code>{card.sourcePrefix}</code></div>
                 <div class="facts"><span>{card.fileCount} FILES</span><span>{formatBytes(card.sizeBytes)}</span></div>
                 {#if card.operation}
-                  <button class="operation" onclick={()=>selected=card.operation}><strong>{stateLabel(card.operation.state)}</strong><span>{card.operation.stage} · {progress(card.operation)}%</span></button>
+                  <button class="operation" onclick={()=>selected=card.operation}><strong>{stateLabel(card.operation.state)}</strong><span>{card.operation.error??card.operation.stage} · {progress(card.operation)}%</span></button>
                   <div class="actions">
                     {#if ['draft','failed'].includes(card.operation.state)}<button onclick={()=>plan(card)}>UPDATE PLAN</button><button class="signal" onclick={()=>execute(card)}>COPY + VERIFY</button>{/if}
                     {#if card.operation.state==='retirement_pending'}<button class="danger" onclick={()=>retire(card)}>RETIRE VERIFIED SOURCES</button>{/if}
@@ -202,7 +212,7 @@
             <div class="path"><span>FROM</span><code>{card.sourcePrefix}</code></div>
             <div class="facts"><span>{card.fileCount} FILES</span><span>{formatBytes(card.sizeBytes)}</span></div>
             {#if card.operation}
-              <button class="operation" onclick={()=>selected=card.operation}><strong>{stateLabel(card.operation.state)}</strong><span>{card.operation.stage} · {progress(card.operation)}%</span></button>
+              <button class="operation" onclick={()=>selected=card.operation}><strong>{stateLabel(card.operation.state)}</strong><span>{card.operation.error??card.operation.stage} · {progress(card.operation)}%</span></button>
               <div class="actions">
                 {#if ['draft','failed'].includes(card.operation.state)}<button onclick={()=>plan(card)}>UPDATE PLAN</button><button class="signal" onclick={()=>execute(card)}>COPY + VERIFY</button>{/if}
                 {#if card.operation.state==='retirement_pending'}<button class="danger" onclick={()=>retire(card)}>RETIRE VERIFIED SOURCES</button>{/if}
@@ -244,7 +254,7 @@
       <div class="batch-list">
         {#each monitorOperations as operation (operation.id)}
           <button class="batch-row" onclick={()=>selected=operation}>
-            <div class="batch-name"><span>{operation.mediaKind.toUpperCase()}</span><strong>{operation.title}</strong><small>{stateLabel(operation.state)} · {operation.stage}</small></div>
+            <div class="batch-name"><span>{operation.mediaKind.toUpperCase()}</span><strong>{operation.title}</strong><small>{stateLabel(operation.state)} · {operation.error??operation.stage}</small></div>
             <div class="batch-progress"><i style={`width:${progress(operation)}%`}></i></div>
             <span>{progress(operation)}%</span>
             <span>{formatBytes(operation.speedBytesPerSecond)}/s</span>

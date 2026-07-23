@@ -16,6 +16,7 @@ export function progressFromLine(line: string) {
   try {
     const parsed = JSON.parse(line) as Record<string, unknown>;
     const stats = (parsed.stats && typeof parsed.stats === 'object' ? parsed.stats : parsed) as Record<string, unknown>;
+    if (!['bytes', 'transferredBytes', 'speed', 'eta', 'etaSeconds'].some((key) => key in stats)) return {};
     const transferredBytes = Number(stats.bytes ?? stats.transferredBytes ?? 0);
     const speedBytesPerSecond = Number(stats.speed ?? 0);
     const eta = Number(stats.eta ?? stats.etaSeconds);
@@ -32,7 +33,7 @@ export function copyOne(source: string, destination: string, completedBytes: num
   return new Promise((resolve, reject) => {
     const child = spawn(config.RCLONE_PATH, [
       'copyto', remotePath(config.RCLONE_WASABI_ROOT, source), remotePath(config.RCLONE_WASABI_ROOT, destination),
-      '--no-traverse', '--stats', '1s', '--stats-one-line-json', '--log-level', 'INFO'
+      '--no-traverse', '--stats', '1s', '--stats-one-line', '--use-json-log', '--log-level', 'INFO'
     ], { stdio: ['ignore', 'pipe', 'pipe'] });
     let lastError = '';
     const onLine = (line: string) => {

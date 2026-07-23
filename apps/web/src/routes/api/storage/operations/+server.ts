@@ -12,6 +12,10 @@ export const GET: RequestHandler = (event) => api('storage.operations.list', asy
   operations: await getMediaRelocationRepository().list(ownerFor(event))
 }));
 
+export const DELETE: RequestHandler = (event) => api('storage.operations.clear-stopped', async () => (
+  getMediaRelocationRepository().clearUntouchedStopped(ownerFor(event))
+));
+
 export const POST: RequestHandler = (event) => api('storage.operations.plan', async () => {
   const ownerId = ownerFor(event);
   const body = await jsonBody(event) as Record<string, unknown>;
