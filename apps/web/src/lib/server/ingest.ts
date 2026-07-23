@@ -148,8 +148,7 @@ export async function inspectWasabiSource(
       canonicalPrefix.replace(/\/$/, ''),
       input.collectionCode,
       entitySlug,
-      pathSegment(workTitle),
-      ...(albumTitle ? [pathSegment(recordingFolder)] : []),
+      pathSegment(albumTitle ? recordingFolder : workTitle),
       parsedMainTrack.filename
     ].join('/'));
     
@@ -215,8 +214,7 @@ export async function inspectWasabiSource(
           canonicalPrefix.replace(/\/$/, ''),
           input.collectionCode,
           entitySlug,
-          pathSegment(workTitle),
-          ...(albumTitle ? [pathSegment(recordingFolder)] : []),
+          pathSegment(albumTitle ? recordingFolder : workTitle),
           parsedTrack.filename
         ].join('/'));
 

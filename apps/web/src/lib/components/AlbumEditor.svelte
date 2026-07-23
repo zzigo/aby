@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount, untrack } from 'svelte';
+  import { resolve } from '$app/paths';
   import type { AlbumRole, AlbumSet, CatalogItem } from '@zztt/aby-domain';
   import { formatDuration } from '$lib/presentation';
   import MetadataQueryLab from './MetadataQueryLab.svelte';
@@ -363,8 +364,7 @@
         body: JSON.stringify(albumPayload())
       });
       acceptItems(body.items, false);
-      const relocated = await relocateCatalogPath();
-      if (relocated === 0) message = 'Saved · canonical filenames already clean';
+      message = 'Saved · storage path unchanged until it is planned in Storage';
     } catch (error) {
       message = error instanceof Error ? error.message : 'Save failed';
     } finally {
@@ -382,7 +382,6 @@
         body: JSON.stringify(albumPayload())
       });
       acceptItems(saved.items, false);
-      await relocateCatalogPath();
       let offset = 0;
       let total = albumItems.filter((item) => item.asset.objectKey.toLowerCase().endsWith('.mp3')).length;
       do {
@@ -397,35 +396,6 @@
       message = `${total} ID3 ${total === 1 ? 'copy' : 'copies'} ready · audio streams unchanged`;
     } catch (error) {
       message = error instanceof Error ? error.message : 'ID3 write failed';
-    } finally {
-      busy = false;
-    }
-  }
-
-  async function relocateCatalogPath(): Promise<number | null> {
-    if (!first || !collectionCode.trim() || !entitySlug.trim()) return 0;
-    busy = true;
-    message = 'Copying and verifying canonical track paths…';
-    try {
-      let remaining = 1;
-      let copied = 0;
-      while (remaining > 0) {
-        const body = await jsonRequest(`/api/albums/${first.albumId}/relocate`, {
-          method: 'POST', headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ collectionCode, entitySlug, limit: 3 })
-        });
-        copied += body.copied;
-        remaining = body.remaining;
-        acceptItems(body.items);
-        message = `Verified ${copied} copies · ${remaining} remaining`;
-      }
-      message = copied
-        ? `${copied} assets moved logically · old copies retained for reviewed deletion`
-        : 'Canonical filenames already clean';
-      return copied;
-    } catch (error) {
-      message = error instanceof Error ? error.message : 'Relocation failed';
-      return null;
     } finally {
       busy = false;
     }
@@ -611,9 +581,7 @@
         </div>
         <div class="duration-compare"><span>DECLARED {albumDuration || '—'}</span><span>ASSETS {formatDuration(localDurationMs)}</span></div>
         <div class="relocation-actions">
-          {#if collectionCode.trim() !== canonicalCollectionCode || entitySlug.trim() !== canonicalEntitySlug}
-            <button onclick={relocateCatalogPath} disabled={busy}>COPY + VERIFY {canonicalCollectionCode}/{canonicalEntitySlug} → {collectionCode.trim()}/{entitySlug.trim()}</button>
-          {/if}
+          <a href={resolve('/storage')}>PLAN PATH IN STORAGE · {canonicalCollectionCode}/{canonicalEntitySlug}</a>
           {#if relocationPending}<button class="retire" onclick={retireOldCopies} disabled={busy}>DELETE {relocationPending} VERIFIED OLD COPIES</button>{/if}
         </div>
         <div class="dependencies"><span>WORK {first.asset.workId}</span><span>ALBUM {first.albumId}</span><span>{albumItems.length} TRACKS INHERIT RELEASE FIELDS</span></div>
