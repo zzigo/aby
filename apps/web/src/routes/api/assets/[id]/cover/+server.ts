@@ -33,13 +33,32 @@ export const GET: RequestHandler = async (event) => {
   if (!allowedHosts.some((host) => source.hostname === host || source.hostname.endsWith(`.${host}`))) {
     throw new AbyError('cover_source_invalid', 'Cover source is not allowed', 400);
   }
-  const response = await fetch(source, {
-    headers: { accept: 'image/avif,image/webp,image/jpeg,image/png', 'user-agent': 'Aby/0.1.0 (https://aby.zztt.org)' },
-    signal: AbortSignal.timeout(20_000)
-  });
+  let response: Response;
+  try {
+    response = await fetch(source, {
+      headers: { accept: 'image/avif,image/webp,image/jpeg,image/png', 'user-agent': 'Aby/0.1.0 (https://aby.zztt.org)' },
+      signal: AbortSignal.timeout(20_000)
+    });
+  } catch {
+    return new Response(null, {
+      status: 302,
+      headers: {
+        location: source.toString(),
+        'cache-control': 'private, max-age=300',
+        'referrer-policy': 'no-referrer'
+      }
+    });
+  }
   const contentType = response.headers.get('content-type') ?? '';
   if (!response.ok || !contentType.startsWith('image/') || !response.body) {
-    throw new AbyError('cover_source_failed', 'Cover source could not be loaded', 502);
+    return new Response(null, {
+      status: 302,
+      headers: {
+        location: source.toString(),
+        'cache-control': 'private, max-age=300',
+        'referrer-policy': 'no-referrer'
+      }
+    });
   }
   return new Response(response.body, {
     headers: {

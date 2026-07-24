@@ -2,6 +2,7 @@
   import { onMount } from 'svelte';
   import { SvelteURLSearchParams } from 'svelte/reactivity';
   import type { Asset, IngestPreview } from '@zztt/aby-domain';
+  import { buildIngestTrackEdits, type IngestTrackEdit } from '$lib/ingest-track-edits';
   import { formatDuration, formatTechnicalFormat } from '$lib/presentation';
 
   type SharedPageData = { user: { id: string; name?: string | null; email?: string | null; picture?: string | null } | null };
@@ -40,7 +41,7 @@
   let releaseDate = $state('');
   let label = $state('');
   let catalogNumber = $state('');
-  let trackEdits = $state<Array<{ objectKey: string; recordingTitle: string; trackNumber?: number }>>([]);
+  let trackEdits = $state<IngestTrackEdit[]>([]);
   let destinationFolder = $state('');
   let isDestFolderCustomized = $state(false);
   let directoryPattern = $state('aby/audio/{collection}/{author}/{album}');
@@ -243,11 +244,7 @@
     releaseDate = nextPreview.candidateMetadata.releaseDate || '';
     label = nextPreview.candidateMetadata.label || '';
     catalogNumber = nextPreview.candidateMetadata.catalogNumber || '';
-    trackEdits = (nextPreview.candidateMetadata.tracks ?? []).map((track, index) => ({
-      objectKey: track.objectKey,
-      recordingTitle: preservedTracks[index]?.recordingTitle || track.recordingTitle,
-      ...(track.trackNumber !== undefined ? { trackNumber: track.trackNumber } : {})
-    }));
+    trackEdits = buildIngestTrackEdits(nextPreview.candidateMetadata.tracks, preservedTracks);
     asset = null;
 
     isDestFolderCustomized = false;
@@ -437,7 +434,9 @@
         const origTrack = preview!.candidateMetadata.tracks?.[idx];
         const filename = origTrack ? origTrack.canonicalObjectKey.split('/').at(-1)! : t.objectKey.split('/').at(-1)!;
         return {
-          ...t,
+          objectKey: t.objectKey,
+          recordingTitle: t.recordingTitle,
+          ...(t.trackNumber !== undefined ? { trackNumber: t.trackNumber } : {}),
           canonicalObjectKey: `${destinationFolder}/${filename}`
         };
       });
@@ -602,7 +601,7 @@
               Tracks remain under the same Work and optional Album.
             </p>
             <div class="collective-tracks">
-              {#each trackEdits as track, index (track.objectKey)}
+              {#each trackEdits as track, index (track.key)}
                 <label>
                   <span>{track.trackNumber ? String(track.trackNumber).padStart(2, '0') : String(index + 1).padStart(2, '0')}</span>
                   <input bind:value={track.recordingTitle} aria-label={`Track ${track.trackNumber ?? index + 1} title`} />
