@@ -611,7 +611,7 @@
         <label>Quality {conversionQuality}<input type="range" min="0" max="10" step="1" bind:value={conversionQuality} /></label>
         <label style="grid-column: span 2; display: flex; flex-direction: column; gap: 4px; margin-top: 8px;">
           <span>Directory Naming Pattern</span>
-          <input bind:value={directoryPattern} placeholder="aby/audio/{collection}/{author}/{album}" style="width: 100%; height: 32px; font-family: monospace; font-size: 11px; padding: 4px 8px; border: 1px solid var(--line); background: #000; color: #fff; box-sizing: border-box;" />
+          <input bind:value={directoryPattern} placeholder={'aby/audio/{collection}/{author}/{album}'} style="width: 100%; height: 32px; font-family: monospace; font-size: 11px; padding: 4px 8px; border: 1px solid var(--line); background: #000; color: #fff; box-sizing: border-box;" />
         </label>
         <button class="save-setup" onclick={saveSetup}>Save Setup</button>
         <small class="setup-message">{setupMessage}</small>
