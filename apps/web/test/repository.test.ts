@@ -218,6 +218,19 @@ describe('preview-before-write repository flow', () => {
     expect(await repository.objectKeyInUse(target)).toBe(true);
   });
 
+  test('relinks canonical identity directly in the database without creating retirement candidates', async () => {
+    const repository = new MemoryAbyRepository();
+    const preview = await repository.savePreview(fixturePreview());
+    const asset = await repository.commitPreview('owner-a', preview.id, 'Work', 'Track', 'Album');
+    const target = 'aby/aud/18/schubert/Work/Album-optimized/01.wav';
+    const relinked = await repository.relinkAsset('owner-a', asset.id, target);
+    expect(relinked.asset.objectKey).toBe(target);
+    expect(relinked.asset.canonicalMetadata.canonicalObjectKey).toBe(target);
+    expect(relinked.asset.canonicalMetadata.storageRetirementCandidates).toBeUndefined();
+    expect(await repository.objectKeyInUse(asset.objectKey)).toBe(false);
+    expect(await repository.objectKeyInUse(target)).toBe(true);
+  });
+
   test('propagates an album title edited from a track to its album siblings', async () => {
     const repository = new MemoryAbyRepository();
     const collective = fixturePreview();

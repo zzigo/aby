@@ -130,6 +130,53 @@
   let supplementalsLoading = $state(false);
   const discogsSetMembers = $derived(candidate?.tracklist?.filter((track) => /^CD\d+$/i.test(track.position ?? '')) ?? []);
 
+  let relinkDialogOpen = $state(false);
+  let relinkCandidates = $state<Array<{ prefix: string; totalFiles: number; matchCount: number; sizeMatches: number; nameMatches: number; score: number }>>([]);
+  let loadingCandidates = $state(false);
+  let customRelinkPath = $state('');
+  let relinkStatusMessage = $state('');
+
+  $effect(() => {
+    if (relinkDialogOpen) {
+      void loadRelinkCandidates();
+    }
+  });
+
+  async function loadRelinkCandidates() {
+    if (!first) return;
+    loadingCandidates = true;
+    relinkStatusMessage = 'Searching Wasabi for matching folders…';
+    try {
+      const body = await jsonRequest(`/api/albums/${first.albumId}/relink/candidates`, {});
+      relinkCandidates = body.candidates ?? [];
+      relinkStatusMessage = relinkCandidates.length ? '' : 'No candidate folders found in Wasabi.';
+    } catch (error) {
+      relinkStatusMessage = error instanceof Error ? error.message : 'Failed to search candidates';
+    } finally {
+      loadingCandidates = false;
+    }
+  }
+
+  async function performRelink(targetPrefix: string) {
+    if (!first || !targetPrefix.trim()) return;
+    busy = true;
+    relinkStatusMessage = 'Relinking database references…';
+    try {
+      const body = await jsonRequest(`/api/albums/${first.albumId}/relink`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ targetPrefix: targetPrefix.trim() })
+      });
+      acceptItems(body.items, false);
+      relinkDialogOpen = false;
+      message = `Successfully relinked ${body.relinkedCount} tracks to "${targetPrefix}"`;
+    } catch (error) {
+      relinkStatusMessage = error instanceof Error ? error.message : 'Relink failed';
+    } finally {
+      busy = false;
+    }
+  }
+
   async function jsonRequest(path: string, options: Parameters<typeof fetch>[1]) {
     const response = await fetch(path, options);
     const body = await response.json();
@@ -582,6 +629,7 @@
         <div class="duration-compare"><span>DECLARED {albumDuration || '—'}</span><span>ASSETS {formatDuration(localDurationMs)}</span></div>
         <div class="relocation-actions">
           <a href={resolve('/storage')}>PLAN PATH IN STORAGE · {canonicalCollectionCode}/{canonicalEntitySlug}</a>
+          <button class="relink-btn" onclick={() => relinkDialogOpen = true} disabled={busy}>RELINK ALBUM FOLDER</button>
           {#if relocationPending}<button class="retire" onclick={retireOldCopies} disabled={busy}>DELETE {relocationPending} VERIFIED OLD COPIES</button>{/if}
         </div>
         <div class="dependencies"><span>WORK {first.asset.workId}</span><span>ALBUM {first.albumId}</span><span>{albumItems.length} TRACKS INHERIT RELEASE FIELDS</span></div>
@@ -748,6 +796,68 @@
       <div><span>{message}</span><small>This application uses Discogs’ API but is not affiliated with, sponsored or endorsed by Discogs. “Discogs” is a trademark of Zink Media, LLC.</small></div>
       <div class="footer-actions"><button onclick={writeId3} disabled={busy}>Write ID3 copies</button><button class="save" onclick={save} disabled={busy}>Save album</button></div>
     </footer>
+
+    {#if relinkDialogOpen}
+      <div class="relink-modal" role="presentation" onclick={(event) => { if (event.target === event.currentTarget) relinkDialogOpen = false; }}>
+        <div class="relink-dialog" role="dialog" aria-modal="true" aria-label="Relink Album Folder">
+          <header class="relink-header">
+            <div>
+              <small>RELINK</small>
+              <h2>Relink Album Folder</h2>
+            </div>
+            <button class="relink-close" onclick={() => relinkDialogOpen = false}>×</button>
+          </header>
+          <main class="relink-main">
+            <p class="relink-intro">
+              Updates the database tracks to point to a different prefix in Wasabi without copying bytes.
+              Use this if you have manually reorganized or cleaned up directories.
+            </p>
+
+            {#if loadingCandidates}
+              <p class="relink-loading">Scanning Wasabi bucket candidates…</p>
+            {/if}
+
+            {#if relinkStatusMessage}
+              <p class="relink-status">{relinkStatusMessage}</p>
+            {/if}
+
+            {#if relinkCandidates.length}
+              <div class="candidates-section">
+                <h3>Suggested Folders in Wasabi</h3>
+                <div class="candidates-list">
+                  {#each relinkCandidates as candidate (candidate.prefix)}
+                    <button class="candidate-row" onclick={() => performRelink(candidate.prefix)} disabled={busy}>
+                      <strong class="candidate-path">{candidate.prefix}</strong>
+                      <span class="candidate-meta">
+                        Matches: {candidate.matchCount} files ({candidate.sizeMatches} size, {candidate.nameMatches} name)
+                      </span>
+                    </button>
+                  {/each}
+                </div>
+              </div>
+            {/if}
+
+            <div class="custom-path-section">
+              <h3>Custom Wasabi Prefix</h3>
+              <div class="custom-path-input-group">
+                <input 
+                  bind:value={customRelinkPath} 
+                  placeholder="e.g. aby/audio/21L/bach/goldberg/" 
+                  disabled={busy}
+                />
+                <button 
+                  onclick={() => performRelink(customRelinkPath)} 
+                  disabled={busy || !customRelinkPath.trim()}
+                  class="primary-btn"
+                >
+                  Relink
+                </button>
+              </div>
+            </div>
+          </main>
+        </div>
+      </div>
+    {/if}
   </div>
 {/if}
 
@@ -761,4 +871,146 @@
   .artist{position:relative}.suggestions{position:absolute;z-index:8;left:0;right:0;top:100%;display:grid;background:#0b0c0b;border:1px solid #41463e}.suggestions button{display:flex;justify-content:space-between;gap:8px;padding:9px;border:0;border-bottom:1px solid #292c27;background:#111310;color:#fff;text-align:left;font:9px ui-monospace,monospace}.suggestions small{font-size:8px;text-align:right}
   .supplementals{grid-column:1/-1;position:relative}.supplemental-navigation{display:flex;gap:5px}.supplemental-navigation button,.supplemental-path button,.supplemental-preview-button,.apply-supplementals{border:1px solid #4a5047;background:#111310;color:#fff;padding:8px 10px;font:9px ui-monospace,monospace}.supplemental-path{margin:10px 0;display:flex;justify-content:space-between;align-items:center;gap:12px;color:#7f867b;font-size:9px;overflow-wrap:anywhere}.supplemental-list{display:grid;border:1px solid #30332e}.supplemental-list article{display:grid;grid-template-columns:auto minmax(180px,1fr) minmax(180px,240px);gap:8px;align-items:center;padding:8px;border-bottom:1px solid #30332e}.supplemental-list article>div{display:grid;gap:3px;min-width:0}.supplemental-list article strong{font-size:10px;overflow-wrap:anywhere}.supplemental-list select,.page-options input{min-width:0;padding:8px;border:1px solid #353a32;background:#0d0f0d;color:#fff;font:9px ui-monospace,monospace}.page-options{grid-column:2/-1!important;display:grid!important;grid-template-columns:90px 120px auto 1fr;align-items:end;gap:8px}.page-options label{display:grid;gap:4px;color:#7f867b;font-size:8px}.page-options .crop-switch{display:flex;align-items:center}.crop-values{display:grid!important;grid-template-columns:repeat(4,1fr);gap:5px}.apply-supplementals{margin-top:12px;border-color:#c8ff52;color:#c8ff52}.apply-supplementals:disabled{opacity:.35}.supplemental-empty{color:#7f867b;font-size:10px}.supplemental-lightbox{position:fixed;z-index:1200;inset:5vh 5vw;display:grid;grid-template-rows:auto 1fr;background:#090a09;border:1px solid #596052;box-shadow:0 20px 80px #000}.supplemental-lightbox header{padding:10px}.supplemental-lightbox header button{border:0;background:transparent;color:#fff;font-size:24px}.supplemental-lightbox img,.supplemental-lightbox iframe{width:100%;height:100%;min-height:0;object-fit:contain;border:0;background:#202020}
   @media(max-width:720px){.album-editor>main{display:block}.grid{grid-template-columns:1fr}.album-editor header,.album-editor footer{padding:12px}.album-editor section{padding:14px;border-right:0}.drop{min-height:190px}footer>div{max-width:65%}footer small{display:none}}
+
+  /* Relink Modal Styles */
+  .relink-modal {
+    position: fixed;
+    z-index: 1300;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.85);
+    display: grid;
+    place-items: center;
+    padding: 20px;
+  }
+  .relink-dialog {
+    width: min(650px, 95vw);
+    max-height: 85dvh;
+    background: #0f110f;
+    border: 1px solid #30332e;
+    display: grid;
+    grid-template-rows: auto 1fr;
+    overflow: hidden;
+  }
+  .relink-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 16px 20px;
+    border-bottom: 1px solid #232622;
+  }
+  .relink-header h2 {
+    font-size: 16px;
+    color: #fff;
+    margin-top: 3px;
+    letter-spacing: normal;
+    text-transform: none;
+  }
+  .relink-close {
+    font-size: 28px;
+    border: 0;
+    background: none;
+    color: #9ba394;
+    cursor: pointer;
+  }
+  .relink-close:hover {
+    color: #fff;
+  }
+  .relink-main {
+    padding: 20px;
+    overflow-y: auto;
+    font-size: 11px;
+    color: #ccd2c6;
+  }
+  .relink-intro {
+    margin: 0 0 20px;
+    line-height: 1.5;
+    color: #9ba394;
+  }
+  .relink-loading, .relink-status {
+    padding: 10px;
+    background: #191c18;
+    border: 1px solid #2f352e;
+    margin-bottom: 15px;
+    color: #c8ff52;
+  }
+  .candidates-section, .custom-path-section {
+    margin-bottom: 24px;
+  }
+  .candidates-section h3, .custom-path-section h3 {
+    margin: 0 0 10px;
+    font-size: 9px;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    color: #9ba394;
+  }
+  .candidates-list {
+    display: grid;
+    gap: 8px;
+    max-height: 200px;
+    overflow-y: auto;
+    border: 1px solid #232622;
+    padding: 8px;
+    background: #080908;
+  }
+  .candidate-row {
+    width: 100%;
+    padding: 10px;
+    background: #111311;
+    border: 1px solid #2a2d28;
+    color: #ccd2c6;
+    text-align: left;
+    cursor: pointer;
+    display: grid;
+    gap: 4px;
+  }
+  .candidate-row:hover:not(:disabled) {
+    border-color: #c8ff52;
+    background: #171a17;
+  }
+  .candidate-path {
+    font-size: 12px;
+    color: #fff;
+    word-break: break-all;
+  }
+  .candidate-meta {
+    font-size: 9px;
+    color: #7f867b;
+  }
+  .custom-path-input-group {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 8px;
+  }
+  .custom-path-input-group input {
+    height: 36px;
+    padding: 0 12px;
+    background: #080908;
+    border: 1px solid #30332e;
+    color: #fff;
+    font-family: inherit;
+    font-size: 11px;
+    box-sizing: border-box;
+  }
+  .custom-path-input-group input:focus {
+    border-color: #c8ff52;
+    outline: none;
+  }
+  .custom-path-input-group button {
+    height: 36px;
+    padding: 0 16px;
+    background: #c8ff52;
+    color: #10110f;
+    border: 0;
+    font-family: inherit;
+    font-weight: 500;
+    cursor: pointer;
+  }
+  .custom-path-input-group button:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+  .relink-btn {
+    border-color: #8da54a !important;
+    color: #d8ef97 !important;
+  }
 </style>

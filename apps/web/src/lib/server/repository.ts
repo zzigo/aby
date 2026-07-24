@@ -75,6 +75,7 @@ export interface AbyRepository {
   saveAvSubtitleSettings(ownerId: string, settings: AvSubtitleSettings): Promise<AvSubtitleSettings>;
   mergeCanonicalMetadata(ownerId: string, assetId: string, metadata: Record<string, unknown>): Promise<CatalogItem>;
   relocateAsset(ownerId: string, assetId: string, sourceObjectKey: string, targetObjectKey: string, collectionCode: string, entitySlug?: string): Promise<CatalogItem>;
+  relinkAsset(ownerId: string, assetId: string, targetObjectKey: string): Promise<CatalogItem>;
   objectKeyInUse(objectKey: string): Promise<boolean>;
   getAsset(ownerId: string, assetId: string): Promise<Asset | null>;
   getSpectrogramAnalysis(ownerId: string, assetId: string): Promise<SpectrogramAnalysis | null>;
@@ -500,6 +501,17 @@ export class MemoryAbyRepository implements AbyRepository {
       ...(entitySlug ? { entitySlug } : {}),
       canonicalObjectKey: targetObjectKey,
       storageRetirementCandidates: [{ sourceObjectKey, targetObjectKey, checksumSha256: asset.checksumSha256, state: 'candidate', copiedAt: new Date().toISOString() }, ...candidates]
+    };
+    return (await this.getCatalogItem(ownerId, assetId))!;
+  }
+
+  async relinkAsset(ownerId: string, assetId: string, targetObjectKey: string): Promise<CatalogItem> {
+    const asset = this.#assets.get(assetId);
+    if (!asset || asset.ownerId !== ownerId) throw new AbyError('asset_not_found', 'Asset not found', 404);
+    asset.objectKey = targetObjectKey;
+    asset.canonicalMetadata = {
+      ...asset.canonicalMetadata,
+      canonicalObjectKey: targetObjectKey
     };
     return (await this.getCatalogItem(ownerId, assetId))!;
   }
@@ -1337,6 +1349,35 @@ export class PostgresAbyRepository implements AbyRepository {
           sourceObjectKey, targetObjectKey, checksumSha256: row.checksum_sha256,
           state: 'candidate', copiedAt: new Date().toISOString()
         }, ...candidates]
+      };
+      await client.query(
+        'UPDATE aby.assets SET object_key=$1,canonical_metadata=$2,updated_at=now() WHERE id=$3',
+        [targetObjectKey, canonicalMetadata, assetId]
+      );
+      await client.query('COMMIT');
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+    return (await this.getCatalogItem(ownerId, assetId))!;
+  }
+
+  async relinkAsset(ownerId: string, assetId: string, targetObjectKey: string): Promise<CatalogItem> {
+    const client = await this.#pool.connect();
+    try {
+      await client.query('BEGIN');
+      const found = await client.query(
+        `SELECT canonical_metadata FROM aby.assets
+         WHERE id=$1 AND owner_id=$2 AND state='active' FOR UPDATE`,
+        [assetId, ownerId]
+      );
+      const row = found.rows[0];
+      if (!row) throw new AbyError('asset_not_found', 'Asset not found', 404);
+      const canonicalMetadata = {
+        ...row.canonical_metadata,
+        canonicalObjectKey: targetObjectKey
       };
       await client.query(
         'UPDATE aby.assets SET object_key=$1,canonical_metadata=$2,updated_at=now() WHERE id=$3',

@@ -58,7 +58,7 @@ export function toWasabiKey(logicalObjectKey: string, rootPrefix = ''): string {
 
 let client: S3Client | undefined;
 
-function wasabiClient(): S3Client {
+export function wasabiClient(): S3Client {
   if (client) return client;
   const config = readConfig();
   if (!config.wasabiConfigured) throw new AbyError('wasabi_not_configured', 'Wasabi credentials are not configured for Aby', 503);
