@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { sourceRecord } from '../src/lib/server/source-record';
+import { groupSourceRecordsByFolder, sourceRecord } from '../src/lib/server/source-record';
 
 const config = { sourceAudioPrefix: 'ref/' };
 
@@ -25,4 +25,26 @@ test('routes legacy VOB film sources to the AV inspection pipeline', () => {
   expect(sourceRecord('mov/1970s/Andrei Tarkovsky/Stalker/VIDEO_TS/VTS_01_1.VOB', config)).toMatchObject({
     mediaKind: 'mov', creatorDisplay: 'Stalker', workTitle: 'VIDEO_TS', recordingTitle: 'VTS_01_1'
   });
+});
+
+test('groups source tracks into one selectable album folder', () => {
+  const records = [
+    sourceRecord('ref/19/Claude Debussy/La Mer/02 Jeux de vagues.mp3', config),
+    sourceRecord('ref/19/Claude Debussy/La Mer/01 De l’aube.mp3', config),
+    sourceRecord('ref/19/Claude Debussy/Images/01 Gigues.mp3', config)
+  ];
+  expect(groupSourceRecordsByFolder(records)).toMatchObject([
+    {
+      sourceKind: 'folder',
+      folderKey: 'ref/19/Claude Debussy/Images',
+      trackCount: 1,
+      objectKey: 'ref/19/Claude Debussy/Images/01 Gigues.mp3'
+    },
+    {
+      sourceKind: 'folder',
+      folderKey: 'ref/19/Claude Debussy/La Mer',
+      trackCount: 2,
+      objectKey: 'ref/19/Claude Debussy/La Mer/01 De l’aube.mp3'
+    }
+  ]);
 });

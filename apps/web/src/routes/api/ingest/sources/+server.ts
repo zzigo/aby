@@ -1,7 +1,7 @@
 import { api, ownerFor } from '$lib/server/errors';
 import { listWasabiSourceKeys } from '$lib/server/storage';
 import { readConfig } from '$lib/server/config';
-import { sourceRecord, type SourceRecord } from '$lib/server/source-record';
+import { groupSourceRecordsByFolder, sourceRecord, type SourceRecord } from '$lib/server/source-record';
 import type { RequestHandler } from './$types';
 
 let sourceCache: { expiresAt: number; records: SourceRecord[] } | undefined;
@@ -41,11 +41,36 @@ export const GET: RequestHandler = (event) => api('ingest.sources', async () => 
 
   const query = event.url.searchParams.get('q')?.trim().toLocaleLowerCase() ?? '';
   const limit = Math.min(250, Math.max(1, Number(event.url.searchParams.get('limit')) || 150));
-  if (!query) return { sources: randomSample(records, limit), total: records.length, sampled: true };
+  if (event.url.searchParams.get('view') === 'folders') {
+    const folders = groupSourceRecordsByFolder(records);
+    const matchingFolderKeys = query
+      ? new Set(records.filter((source) =>
+          source.objectKey.toLocaleLowerCase().includes(query)
+          || source.creatorDisplay.toLocaleLowerCase().includes(query)
+          || source.workTitle.toLocaleLowerCase().includes(query)
+          || source.recordingTitle.toLocaleLowerCase().includes(query)
+        ).map((source) => {
+          const boundary = source.objectKey.lastIndexOf('/');
+          return boundary > 0 ? source.objectKey.slice(0, boundary) : source.objectKey;
+        }))
+      : undefined;
+    const matches = query
+      ? folders.filter((source) => matchingFolderKeys?.has(source.folderKey))
+      : folders;
+    return {
+      sources: query ? matches.slice(0, limit) : randomSample(matches, limit),
+      total: matches.length,
+      sampled: matches.length > limit
+    };
+  }
   const matches = records.filter((source) =>
     source.objectKey.toLocaleLowerCase().includes(query)
     || source.creatorDisplay.toLocaleLowerCase().includes(query)
     || source.workTitle.toLocaleLowerCase().includes(query)
   );
-  return { sources: matches.slice(0, limit), total: matches.length, sampled: matches.length > limit };
+  return {
+    sources: query ? matches.slice(0, limit) : randomSample(matches, limit),
+    total: matches.length,
+    sampled: matches.length > limit
+  };
 });

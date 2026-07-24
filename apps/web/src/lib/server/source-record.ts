@@ -10,6 +10,12 @@ export interface SourceRecord {
   recordingTitle: string;
 }
 
+export interface SourceFolderRecord extends SourceRecord {
+  sourceKind: 'folder';
+  folderKey: string;
+  trackCount: number;
+}
+
 interface SourcePrefixes {
   sourceAudioPrefix: string;
 }
@@ -77,4 +83,24 @@ export function sourceRecord(key: string, config: SourcePrefixes): SourceRecord 
     workTitle,
     recordingTitle
   };
+}
+
+export function groupSourceRecordsByFolder(records: SourceRecord[]): SourceFolderRecord[] {
+  const folders = new Map<string, SourceRecord[]>();
+  for (const record of records) {
+    const boundary = record.objectKey.lastIndexOf('/');
+    const folderKey = boundary > 0 ? record.objectKey.slice(0, boundary) : record.objectKey;
+    folders.set(folderKey, [...(folders.get(folderKey) ?? []), record]);
+  }
+  return [...folders.entries()].map(([folderKey, members]) => {
+    const sorted = [...members].sort((left, right) =>
+      left.objectKey.localeCompare(right.objectKey, undefined, { numeric: true })
+    );
+    return {
+      ...sorted[0]!,
+      sourceKind: 'folder' as const,
+      folderKey,
+      trackCount: sorted.length
+    };
+  }).sort((left, right) => left.folderKey.localeCompare(right.folderKey, undefined, { numeric: true }));
 }

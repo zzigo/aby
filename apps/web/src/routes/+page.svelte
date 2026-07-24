@@ -16,6 +16,18 @@
     detail?: string;
   };
   type RetirementSort = 'folder' | 'objectCount' | 'sizeBytes' | 'state' | 'checkedAt';
+  type SurfSource = {
+    objectKey: string;
+    mediaKind: 'aud' | 'mov';
+    collectionCode: string;
+    entitySlug: string;
+    creatorDisplay: string;
+    workTitle: string;
+    recordingTitle: string;
+    sourceKind?: 'folder';
+    folderKey?: string;
+    trackCount?: number;
+  };
   let { data }: { data: SharedPageData } = $props();
 
   let preview = $state<IngestPreview | null>(null);
@@ -281,25 +293,26 @@
     }
   }
 
-  let surfSources = $state<Array<{
-    objectKey: string;
-    mediaKind: string;
-    collectionCode: string;
-    entitySlug: string;
-    creatorDisplay: string;
-    workTitle: string;
-    recordingTitle: string;
-  }>>([]);
+  let surfSources = $state<SurfSource[]>([]);
   let showSurfList = $state(false);
   let loadingSurf = $state(false);
   let surfQuery = $state('');
   let surfTotal = $state(0);
+  let surfView = $state<'folders' | 'tracks'>('folders');
   let surfSearchTimer: ReturnType<typeof setTimeout> | undefined;
+  let discogsRelease = $state('');
+  let discogsFolderQuery = $state('');
+  let discogsFolderOptions = $state<SurfSource[]>([]);
+  let selectedDiscogsFolder = $state<SurfSource | null>(null);
+  let showDiscogsFolders = $state(false);
+  let loadingDiscogsFolders = $state(false);
+  let discogsFolderSearchTimer: ReturnType<typeof setTimeout> | undefined;
 
   async function loadSurfSources(query = surfQuery) {
     loadingSurf = true;
     try {
       const params = new SvelteURLSearchParams({ mode: 'surf', media: 'aud', limit: '150' });
+      if (surfView === 'folders') params.set('view', 'folders');
       if (query.trim()) params.set('q', query.trim());
       const response = await fetch(`/api/ingest/sources?${params}`);
       const body = await response.json();
@@ -318,6 +331,12 @@
   function queueSurfSearch() {
     clearTimeout(surfSearchTimer);
     surfSearchTimer = setTimeout(() => loadSurfSources(), 300);
+  }
+
+  async function setSurfView(view: 'folders' | 'tracks') {
+    surfView = view;
+    surfSources = [];
+    await loadSurfSources();
   }
 
   async function toggleSurf() {
@@ -346,6 +365,62 @@
       status = `Inspected: ${result.preview.objectKey}. Real candidate ready.`;
     } catch (error) {
       status = error instanceof Error ? error.message : 'Inspection failed';
+    } finally {
+      busy = false;
+    }
+  }
+
+  async function loadDiscogsFolders(query = discogsFolderQuery) {
+    loadingDiscogsFolders = true;
+    showDiscogsFolders = true;
+    try {
+      const params = new SvelteURLSearchParams({ mode: 'surf', media: 'aud', view: 'folders', limit: '80' });
+      if (query.trim()) params.set('q', query.trim());
+      const response = await fetch(`/api/ingest/sources?${params}`);
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error?.message ?? 'Wasabi album folders could not be loaded');
+      discogsFolderOptions = body.sources ?? [];
+    } catch (error) {
+      status = error instanceof Error ? error.message : 'Wasabi album folders could not be loaded';
+      discogsFolderOptions = [];
+    } finally {
+      loadingDiscogsFolders = false;
+    }
+  }
+
+  function queueDiscogsFolderSearch() {
+    selectedDiscogsFolder = null;
+    clearTimeout(discogsFolderSearchTimer);
+    discogsFolderSearchTimer = setTimeout(() => loadDiscogsFolders(), 300);
+  }
+
+  function selectDiscogsFolder(source: SurfSource) {
+    selectedDiscogsFolder = source;
+    discogsFolderQuery = source.folderKey ?? source.objectKey.slice(0, source.objectKey.lastIndexOf('/'));
+    showDiscogsFolders = false;
+  }
+
+  async function addByDiscogs() {
+    if (!selectedDiscogsFolder || !discogsRelease.trim()) return;
+    busy = true;
+    showDiscogsFolders = false;
+    status = `Inspecting ${selectedDiscogsFolder.folderKey} and loading Discogs ${discogsRelease.trim()}…`;
+    try {
+      const result = await request('/api/ingest/preview/discogs', {
+        release: discogsRelease.trim(),
+        sourceObjectKey: selectedDiscogsFolder.objectKey,
+        mediaKind: selectedDiscogsFolder.mediaKind,
+        collectionCode: selectedDiscogsFolder.collectionCode,
+        entitySlug: selectedDiscogsFolder.entitySlug,
+        creatorDisplay: selectedDiscogsFolder.creatorDisplay,
+        workTitle: selectedDiscogsFolder.workTitle,
+        recordingTitle: selectedDiscogsFolder.recordingTitle,
+        analyze: false
+      });
+      applyPreview(result.preview);
+      status = `Discogs ${result.discogs.id} + ${selectedDiscogsFolder.trackCount ?? 1} Wasabi tracks ready for editable review.`;
+    } catch (error) {
+      status = error instanceof Error ? error.message : 'Discogs folder inspection failed';
     } finally {
       busy = false;
     }
@@ -425,13 +500,55 @@
           <button class="secondary" onclick={toggleSurf} disabled={busy} style="flex: 1;">Surf sources</button>
         </div>
 
+        <div class="discogs-folder-adopt">
+          <header>
+            <span>DISCOGS + WASABI ALBUM</span>
+            <small>Exact release metadata · current folder files</small>
+          </header>
+          <div class="discogs-folder-inputs">
+            <input bind:value={discogsRelease} aria-label="Discogs release ID or URL" placeholder="Discogs ID or release URL" />
+            <div class="folder-picker">
+              <input
+                bind:value={discogsFolderQuery}
+                aria-label="Wasabi album folder"
+                placeholder="Choose album folder in ref/…"
+                onfocus={() => { showDiscogsFolders = true; if (!discogsFolderOptions.length) loadDiscogsFolders(); }}
+                oninput={queueDiscogsFolderSearch}
+              />
+              {#if showDiscogsFolders}
+                <div class="folder-options">
+                  {#if loadingDiscogsFolders}
+                    <small>Scanning Wasabi album folders…</small>
+                  {:else if !discogsFolderOptions.length}
+                    <small>No matching album folders.</small>
+                  {:else}
+                    {#each discogsFolderOptions as folder (folder.folderKey)}
+                      <button onclick={() => selectDiscogsFolder(folder)}>
+                        <strong>{folder.workTitle}</strong>
+                        <span>{folder.trackCount ?? 1} tracks · {folder.folderKey}</span>
+                      </button>
+                    {/each}
+                  {/if}
+                </div>
+              {/if}
+            </div>
+            <button class="discogs-add" onclick={addByDiscogs} disabled={busy || !discogsRelease.trim() || !selectedDiscogsFolder}>
+              ADD BY DISCOGS
+            </button>
+          </div>
+        </div>
+
         {#if showSurfList}
           <div style="margin-top: 12px; border: 1px solid var(--line); padding: 12px; background: #131412; max-height: 280px; display: flex; flex-direction: column; gap: 8px; overflow: hidden; z-index: 10;">
+            <div class="surf-modes">
+              <button class:active={surfView === 'folders'} onclick={() => setSurfView('folders')}>ALBUM FOLDERS</button>
+              <button class:active={surfView === 'tracks'} onclick={() => setSurfView('tracks')}>TRACKS</button>
+            </div>
             <div class="surf-search">
-              <input type="text" bind:value={surfQuery} oninput={queueSurfSearch} placeholder="Search audio in ref/…" />
+              <input type="text" bind:value={surfQuery} oninput={queueSurfSearch} placeholder={surfView === 'folders' ? 'Search album folders in ref/…' : 'Search tracks in ref/…'} />
               <button onclick={() => loadSurfSources(surfQuery)} aria-label="Refresh source sample">↻</button>
             </div>
-            <small class="surf-count">{surfQuery.trim() ? `${surfTotal} matches` : `${surfSources.length} sampled from ${surfTotal}`}</small>
+            <small class="surf-count">{surfQuery.trim() ? `${surfTotal} matches` : `${surfSources.length} sampled from ${surfTotal}`} · {surfView === 'folders' ? 'one row per album folder' : 'individual files'}</small>
             
             {#if loadingSurf}
               <div style="color: var(--muted); font-size: 11px; font-family: ui-monospace, monospace; padding: 8px 0;">Scanning Wasabi...</div>
@@ -445,10 +562,10 @@
                     class="surf-item-btn"
                   >
                     <span style="font-size: 10px; color: var(--signal); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; width: 100%;">
-                      {src.creatorDisplay} — {src.workTitle}
+                      {src.creatorDisplay} — {src.workTitle}{#if src.sourceKind === 'folder'} · {src.trackCount} TRACKS{/if}
                     </span>
                     <span style="font-size: 9px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; width: 100%; direction: rtl; text-align: left;">
-                      {src.objectKey}
+                      {src.folderKey ?? src.objectKey}
                     </span>
                   </button>
                 {/each}
@@ -641,6 +758,8 @@
     outline: none;
   }
   .surf-search{display:grid;grid-template-columns:1fr auto}.surf-search input{width:100%;font-size:11px;padding:8px;background:#0c0d0c;border:1px solid var(--line);color:#fff;font-family:ui-monospace,monospace;box-sizing:border-box}.surf-search button{border:1px solid var(--line);border-left:0;background:#0c0d0c;color:var(--signal);padding:0 12px}.surf-count{font:9px ui-monospace,monospace;color:var(--muted)}
+  .surf-modes{display:flex;gap:5px}.surf-modes button{padding:6px 9px;border:1px solid var(--line);background:transparent;color:var(--muted);font:8px ui-monospace,monospace}.surf-modes button.active{border-color:var(--signal);color:var(--signal)}
+  .discogs-folder-adopt{position:relative;margin-top:10px;padding:10px;border:1px solid #30342d;background:#10120f}.discogs-folder-adopt>header{display:flex;justify-content:space-between;gap:10px;margin-bottom:8px}.discogs-folder-adopt>header span{color:var(--signal);font:9px ui-monospace,monospace}.discogs-folder-adopt>header small{color:var(--muted);font:8px ui-monospace,monospace}.discogs-folder-inputs{display:grid;grid-template-columns:minmax(120px,.8fr) minmax(180px,1.4fr) auto;gap:6px}.discogs-folder-inputs input{min-width:0;width:100%;height:34px;box-sizing:border-box;padding:0 8px;border:1px solid var(--line);background:#090a09;color:#fff;font:9px ui-monospace,monospace}.folder-picker{position:relative}.folder-options{position:absolute;z-index:25;top:38px;right:0;left:0;max-height:260px;padding:4px;overflow:auto;border:1px solid #3b4037;background:#0b0d0b;box-shadow:0 16px 35px #000b}.folder-options>small{display:block;padding:10px;color:var(--muted);font:9px ui-monospace,monospace}.folder-options button{width:100%;padding:8px;display:grid;gap:3px;border:0;border-bottom:1px dashed #30342d;background:transparent;color:#fff;text-align:left}.folder-options button:hover{background:#c6ff5210}.folder-options strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font:10px Georgia,serif;font-weight:400}.folder-options span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted);font:8px ui-monospace,monospace}.discogs-add{height:34px;padding:0 10px;border:1px solid var(--signal);background:transparent;color:var(--signal);font:8px ui-monospace,monospace}.discogs-add:disabled{opacity:.35}
   .collective-tracks{max-height:240px;overflow-y:auto;display:grid;gap:5px;padding-right:4px}.collective-tracks label{display:grid;grid-template-columns:30px 1fr;align-items:center;margin:0}.collective-tracks label span{font:10px ui-monospace,monospace;color:var(--signal)}.collective-tracks input{margin:0!important;padding:7px!important;font-size:11px!important}
   .setup-section{margin-top:72px;border:1px solid var(--line);background:var(--surface)}
   .setup-section>header{display:flex;gap:18px;align-items:baseline;padding:18px 22px;border-bottom:1px solid var(--line)}
@@ -655,6 +774,6 @@
   .retirement-section table{width:100%;border-collapse:collapse;min-width:900px}.retirement-section th,.retirement-section td{padding:12px 14px;text-align:left;border-bottom:1px solid var(--line);vertical-align:top;font:10px ui-monospace,monospace}.retirement-section th{padding-block:8px;color:var(--muted);font-weight:400}.retirement-section th button{border:0;background:transparent;color:inherit;font:inherit;padding:0;cursor:pointer}.retirement-section tbody tr:last-child td{border-bottom:0}
   .retirement-folder{max-width:480px}.retirement-folder strong{display:block;color:#fff;font-weight:500;overflow-wrap:anywhere}.retirement-section td small{display:block;margin-top:4px;color:var(--muted)}.retirement-result{color:var(--signal)!important}.retirement-state{text-transform:uppercase;color:var(--muted)}.retirement-state.verified{color:var(--signal)}.retirement-state.blocked{color:#ff8b70}
   .retirement-actions{display:flex;gap:6px;justify-content:flex-end}.retirement-actions button{border:1px solid var(--line);background:transparent;color:#fff;padding:7px 10px;font:9px ui-monospace,monospace;cursor:pointer}.retirement-actions button:disabled{opacity:.28;cursor:not-allowed}.retirement-actions .delete-source:not(:disabled){border-color:#ff765f;color:#ff8b70}.empty-retirement{padding:30px!important;text-align:center!important;color:var(--muted)}.visually-hidden{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
-  @media(max-width:760px){.setup-grid{grid-template-columns:1fr auto}.setup-grid label{grid-column:span 2}.save-setup{grid-column:span 2}.retirement-section{margin-top:42px}.retirement-section>header{padding:15px}.retirement-intro{padding:14px 15px}}
+  @media(max-width:760px){.discogs-folder-inputs{grid-template-columns:1fr}.discogs-folder-adopt>header{display:grid}.setup-grid{grid-template-columns:1fr auto}.setup-grid label{grid-column:span 2}.save-setup{grid-column:span 2}.retirement-section{margin-top:42px}.retirement-section>header{padding:15px}.retirement-intro{padding:14px 15px}}
   .audio-inspect{max-width:1500px;padding-top:64px}.audio-inspect .intro{margin-bottom:54px}.audio-inspect .workflow article{background:var(--surface);border-color:var(--line)}.audio-inspect .workflow article header span{color:var(--signal)}.audio-inspect .signal-outline{border-color:var(--signal);color:var(--signal);background:transparent;font:700 11.5px ui-monospace,monospace;letter-spacing:.04em}.audio-inspect .signal-outline:hover:not(:disabled){background:#c6ff5212}.audio-inspect label{font-size:12.65px}.audio-inspect .status-line{font-size:14.95px}.audio-inspect .surf-item-btn span{font-size:11.5px!important}.audio-inspect .surf-count{font-size:10.35px}
 </style>
