@@ -170,6 +170,15 @@ export class MediaRelocationRepository {
     return { deleted: deleted.rowCount ?? 0, preserved: Number(preserved.rows[0]?.count ?? 0) };
   }
 
+  async clearFinished(ownerId: string): Promise<{ deleted: number }> {
+    const result = await this.#pool.query(
+      `DELETE FROM aby.media_relocation_operations
+       WHERE owner_id=$1 AND state IN ('succeeded', 'cancelled')`,
+      [ownerId]
+    );
+    return { deleted: result.rowCount ?? 0 };
+  }
+
   async update(ownerId: string, id: string, patch: OperationPatch): Promise<MediaRelocationOperation> {
     const current = await this.get(ownerId, id);
     if (!current) throw new AbyError('relocation_not_found', 'Storage relocation not found', 404);

@@ -351,8 +351,12 @@
 
 {#if operations.length}
   <aside class:open={monitorOpen} class="process-dock" aria-label="Storage process monitor">
-    <button class="dock-head" onclick={()=>monitorOpen=!monitorOpen}>
-      <div><span>ABY PROCESS MONITOR</span><strong>{activeOperations.length} ACTIVE · {approvedPlans.length} APPROVED · {monitorOperations.length} BATCHES</strong></div>
+    <div class="dock-head" role="button" tabindex="0" onclick={(e)=>{ if (e.target instanceof Element && e.target.closest('.clear-console-btn')) return; monitorOpen=!monitorOpen; }} onkeydown={(e)=>{ if (e.key==='Enter'||e.key===' ') { e.preventDefault(); monitorOpen=!monitorOpen; } }}>
+      <div>
+        <span>ABY PROCESS MONITOR</span>
+        <strong>{activeOperations.length} ACTIVE · {approvedPlans.length} APPROVED · {monitorOperations.length} BATCHES</strong>
+        <button class="clear-console-btn" onclick={(e)=>{e.stopPropagation(); refreshAndClear();}}>CLEAR CONSOLE</button>
+      </div>
       <div class="aggregate-meter"><i style={`width:${aggregate.sizeBytes?Math.min(100,Math.round(aggregate.transferredBytes/aggregate.sizeBytes*100)):0}%`}></i></div>
       <div class="aggregate-facts">
         <span>{formatBytes(aggregate.transferredBytes)} / {formatBytes(aggregate.sizeBytes)}</span>
@@ -361,7 +365,7 @@
         <span>LEFT {formatDuration(aggregate.etaSeconds)}</span>
       </div>
       <b>{monitorOpen?'⌄':'⌃'}</b>
-    </button>
+    </div>
     {#if monitorOpen}
       <div class="batch-list">
         {#each monitorOperations as operation (operation.id)}
@@ -787,6 +791,21 @@
   .dock-head strong {
     font: 9px ui-monospace, monospace;
     color: var(--signal);
+  }
+  .clear-console-btn {
+    margin-top: 3px;
+    width: fit-content;
+    height: 18px;
+    padding: 0 6px;
+    border: 1px solid #ff8e78;
+    background: transparent;
+    color: #ff8e78;
+    font: 8px ui-monospace, monospace;
+    cursor: pointer;
+  }
+  .clear-console-btn:hover {
+    background: #ff8e78;
+    color: #000;
   }
   .dock-head>b {
     font: 16px ui-monospace, monospace;

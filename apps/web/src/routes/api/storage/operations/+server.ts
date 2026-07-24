@@ -12,9 +12,16 @@ export const GET: RequestHandler = (event) => api('storage.operations.list', asy
   operations: await getMediaRelocationRepository().list(ownerFor(event))
 }));
 
-export const DELETE: RequestHandler = (event) => api('storage.operations.clear-stopped', async () => (
-  getMediaRelocationRepository().clearUntouchedStopped(ownerFor(event))
-));
+export const DELETE: RequestHandler = (event) => api('storage.operations.clear', async () => {
+  const ownerId = ownerFor(event);
+  const repo = getMediaRelocationRepository();
+  const stopped = await repo.clearUntouchedStopped(ownerId);
+  const finished = await repo.clearFinished(ownerId);
+  return {
+    deleted: stopped.deleted + finished.deleted,
+    preserved: stopped.preserved
+  };
+});
 
 export const POST: RequestHandler = (event) => api('storage.operations.plan', async () => {
   const ownerId = ownerFor(event);
