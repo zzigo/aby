@@ -25,6 +25,33 @@
   function openItem(item: CatalogItem) {
     void goto(resolve('/player'), { state: { assetId: item.asset.id } });
   }
+
+  async function deleteAlbum(targetItem: CatalogItem) {
+    const groupKey = targetItem.albumId ?? `work:${targetItem.asset.workId}`;
+    const matchingItems = items.filter(item => {
+      const key = item.albumId ?? `work:${item.asset.workId}`;
+      return key === groupKey;
+    });
+
+    items = items.filter(item => {
+      const key = item.albumId ?? `work:${item.asset.workId}`;
+      return key !== groupKey;
+    });
+
+    try {
+      await Promise.all(matchingItems.map(item =>
+        fetch(`/api/assets/${item.asset.id}`, { method: 'DELETE' }).then(res => {
+          if (!res.ok) throw new Error(`Failed to delete asset ${item.asset.id}`);
+        })
+      ));
+    } catch (error) {
+      console.error('Delete failed:', error);
+      const response = await fetch('/api/catalog');
+      const body = await response.json();
+      if (response.ok) items = body.items;
+      message = error instanceof Error ? error.message : 'Deletion failed';
+    }
+  }
 </script>
 
 <svelte:head>
@@ -35,7 +62,7 @@
 <main class="gallery-page">
   {#if loading}<p class="gallery-state">…</p>
   {:else if message}<p class="gallery-state failure">{message}</p>
-  {:else}<GalleryView {items} onselect={openItem} />{/if}
+  {:else}<GalleryView {items} onselect={openItem} ondelete={deleteAlbum} />{/if}
 </main>
 
 <style>

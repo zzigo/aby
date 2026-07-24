@@ -29,6 +29,9 @@
   let label = $state('');
   let catalogNumber = $state('');
   let trackEdits = $state<Array<{ objectKey: string; recordingTitle: string; trackNumber?: number }>>([]);
+  let destinationFolder = $state('');
+  let isDestFolderCustomized = $state(false);
+  let directoryPattern = $state('aby/audio/{collection}/{author}/{album}');
   let status = $state('Ready for one bounded inspection.');
   let busy = $state(false);
   let autoSeparation = $state(true);
@@ -46,6 +49,7 @@
   onMount(async () => {
     const userId = data.user?.id ?? 'anonymous';
     autoSeparation = localStorage.getItem(`aby.config.auto-separation:${userId}`) !== 'false';
+    directoryPattern = localStorage.getItem('aby.config.directory-pattern') || 'aby/audio/{collection}/{author}/{album}';
     if (data.user) {
       try {
         const response = await fetch('/api/settings');
@@ -155,6 +159,7 @@
   async function saveSetup() {
     setupMessage = 'Saving…';
     try {
+      localStorage.setItem('aby.config.directory-pattern', directoryPattern);
       const response = await fetch('/api/settings', {
         method: 'PATCH', headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ container: 'ogg', codec: conversionCodec, quality: conversionQuality })
@@ -164,6 +169,46 @@
       setupMessage = 'Saved';
     } catch (error) { setupMessage = error instanceof Error ? error.message : 'Setup could not be saved'; }
   }
+
+  function composerSurnameSlug(value: string): string {
+    const primaryName = value.split(/\s*(?:;|&|\band\b|\by\b)\s*/iu)[0]?.trim() ?? '';
+    const surname = primaryName.includes(',')
+      ? primaryName.split(',')[0]!.trim()
+      : primaryName.split(/\s+/).filter(Boolean).at(-1) ?? '';
+    return surname.normalize('NFKD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLocaleLowerCase()
+      .replace(/[^a-z0-9]+/g, '');
+  }
+
+  function albumSlug(value: string): string {
+    return value.normalize('NFKD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLocaleLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/-{2,}/g, '-')
+      .replace(/^-|-$/g, '');
+  }
+
+  function formatDestinationFolder(pattern: string, collection: string, authorName: string, albumName: string) {
+    const author = composerSurnameSlug(authorName || 'unknown');
+    const albumFolder = albumSlug(albumName || 'unknown');
+    return pattern
+      .replace('{collection}', collection || 'unknown')
+      .replace('{author}', author)
+      .replace('{album}', albumFolder);
+  }
+
+  $effect(() => {
+    if (!isDestFolderCustomized && preview) {
+      destinationFolder = formatDestinationFolder(
+        directoryPattern,
+        preview.candidateMetadata.collectionCode || '',
+        creator,
+        albumTitle || workTitle
+      );
+    }
+  });
 
   async function request(path: string, body: unknown) {
     const response = await fetch(path, {
@@ -192,6 +237,10 @@
       ...(track.trackNumber !== undefined ? { trackNumber: track.trackNumber } : {})
     }));
     asset = null;
+
+    isDestFolderCustomized = false;
+    const parentKey = nextPreview.candidateMetadata.canonicalObjectKey || '';
+    destinationFolder = parentKey.substring(0, parentKey.lastIndexOf('/'));
   }
 
   async function surpriseMe() {
@@ -307,6 +356,17 @@
     busy = true;
     status = 'Copying, verifying and adding to the catalog…';
     try {
+      const parentFilename = preview.candidateMetadata.canonicalObjectKey.split('/').at(-1)!;
+      const finalCanonicalObjectKey = `${destinationFolder}/${parentFilename}`;
+      const finalTracks = trackEdits.map((t, idx) => {
+        const origTrack = preview!.candidateMetadata.tracks?.[idx];
+        const filename = origTrack ? origTrack.canonicalObjectKey.split('/').at(-1)! : t.objectKey.split('/').at(-1)!;
+        return {
+          ...t,
+          canonicalObjectKey: `${destinationFolder}/${filename}`
+        };
+      });
+
       const result = await request('/api/ingest/commit', {
         previewId: preview.id,
         workTitle,
@@ -317,7 +377,8 @@
         releaseDate,
         label,
         catalogNumber,
-        ...(trackEdits.length > 1 ? { tracks: trackEdits } : {})
+        canonicalObjectKey: finalCanonicalObjectKey,
+        ...(trackEdits.length > 1 ? { tracks: finalTracks } : {})
       });
       if (result.preview) preview = result.preview;
       asset = result.asset;
@@ -434,6 +495,17 @@
           </div>
         {/if}
 
+        <label style="margin-top: 12px; display: block;">
+          Destination Folder
+          <input 
+            bind:value={destinationFolder} 
+            oninput={() => isDestFolderCustomized = true} 
+            placeholder="aby/audio/..." 
+            style="width: 100%; height: 32px; font-family: monospace; font-size: 11px; padding: 4px 8px; border: 1px solid var(--line); background: #000; color: #fff; box-sizing: border-box; margin-top: 4px;" 
+          />
+        </label>
+        <div style="height: 12px;"></div>
+
         <button class="primary" onclick={addToCatalog} disabled={busy || Boolean(asset)}>Add to catalog</button>
       {:else}
         <p>Candidate metadata will appear here. It remains editable until explicit commit.</p>
@@ -537,7 +609,11 @@
         <button class:active={autoSeparation} onclick={toggleAutoSeparation}>{autoSeparation ? 'ON' : 'OFF'}</button>
         <label>Ogg codec<select bind:value={conversionCodec}><option value="libvorbis">Vorbis</option><option value="libopus">Opus</option></select></label>
         <label>Quality {conversionQuality}<input type="range" min="0" max="10" step="1" bind:value={conversionQuality} /></label>
-        <button class="save-setup" onclick={saveSetup}>Save conversion</button>
+        <label style="grid-column: span 2; display: flex; flex-direction: column; gap: 4px; margin-top: 8px;">
+          <span>Directory Naming Pattern</span>
+          <input bind:value={directoryPattern} placeholder="aby/audio/{collection}/{author}/{album}" style="width: 100%; height: 32px; font-family: monospace; font-size: 11px; padding: 4px 8px; border: 1px solid var(--line); background: #000; color: #fff; box-sizing: border-box;" />
+        </label>
+        <button class="save-setup" onclick={saveSetup}>Save Setup</button>
         <small class="setup-message">{setupMessage}</small>
       </div>
     </section>

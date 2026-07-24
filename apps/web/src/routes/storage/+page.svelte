@@ -57,7 +57,7 @@
     return operation.sizeBytes ? Math.min(100,Math.round(operation.transferredBytes/operation.sizeBytes*100)) : 0;
   }
   function stateLabel(state:string) {
-    return ({draft:'APPROVED PLAN',copying:'COPYING',verifying:'VERIFYING',retirement_pending:'VERIFIED · SOURCE RETAINED',retiring:'RETIRING SOURCE',succeeded:'MOVED',failed:'RETRY APPROVED',cancelled:'CANCELLED'} as Record<string,string>)[state] ?? state.toUpperCase();
+    return ({draft:'APPROVED PLAN',copying:'COPYING',verifying:'VERIFYING',retirement_pending:'VERIFIED · READY TO RETIRE',retiring:'RETIRING SOURCE',succeeded:'MOVED',failed:'RETRY APPROVED',cancelled:'CANCELLED'} as Record<string,string>)[state] ?? state.toUpperCase();
   }
   function formatDuration(seconds:number|undefined) {
     if (seconds===undefined || !Number.isFinite(seconds)) return '—';
@@ -175,53 +175,165 @@
   </section>
 
   {#if loading}<p class="state">READING CATALOG AND STORAGE STATE…</p>{:else}
-    <section class="board" aria-label="Audio collection board">
+    <section class="board-list" aria-label="Audio collection lists">
       {#each lanes as lane (lane)}
-        <div class="lane" role="group" aria-label={`Collection ${lane}`} ondragover={(event)=>event.preventDefault()} ondrop={()=>moveToLane(lane)}>
-          <header><strong>{lane}</strong><span>{visible.filter((card)=>card.mediaKind==='audio'&&card.collectionCode===lane).length}</span></header>
-          <div class="stack">
-            {#each visible.filter((card)=>card.mediaKind==='audio'&&card.collectionCode===lane) as card (card.entityId)}
-              <article draggable={!card.operation||['draft','failed'].includes(card.operation.state)} ondragstart={()=>dragged=card.entityId}>
-                <div class="card-title"><span>AUDIO · {card.entityType.toUpperCase()}</span><strong>{card.title}</strong>{#if card.setTitle}<small>SET · {card.setTitle}</small>{/if}</div>
-                {#if card.anomalies.length}<ul>{#each card.anomalies as anomaly (anomaly)}<li>{anomaly}</li>{/each}</ul>{/if}
-                <label>DESTINATION PREFIX<input bind:value={card.destinationPrefix} /></label>
-                <div class="path"><span>FROM</span><code>{card.sourcePrefix}</code></div>
-                <div class="facts"><span>{card.fileCount} FILES</span><span>{formatBytes(card.sizeBytes)}</span></div>
-                {#if card.operation}
-                  <button class="operation" onclick={()=>selected=card.operation}><strong>{stateLabel(card.operation.state)}</strong><span>{card.operation.error??card.operation.stage} · {progress(card.operation)}%</span></button>
-                  <div class="actions">
-                    {#if ['draft','failed'].includes(card.operation.state)}<button onclick={()=>plan(card)}>UPDATE PLAN</button><button class="signal" onclick={()=>execute(card)}>COPY + VERIFY</button>{/if}
-                    {#if card.operation.state==='retirement_pending'}<button class="danger" onclick={()=>retire(card)}>RETIRE VERIFIED SOURCES</button>{/if}
-                  </div>
-                {:else}<button class="signal wide" onclick={()=>plan(card)}>SAVE PLAN</button>{/if}
-              </article>
-            {/each}
+        {@const laneCards = visible.filter((card)=>card.mediaKind==='audio'&&card.collectionCode===lane)}
+        {#if laneCards.length}
+          <div class="lane-group" role="group" aria-label={`Collection ${lane}`} ondragover={(event)=>event.preventDefault()} ondrop={()=>moveToLane(lane)}>
+            <header class="lane-header">
+              <strong>COLLECTION {lane}</strong>
+              <span class="count">{laneCards.length} ITEMS</span>
+            </header>
+            <div class="table-container">
+              <table class="storage-table">
+                <thead>
+                  <tr>
+                    <th style="width: 25%;">TITLE / ANOMALIES</th>
+                    <th style="width: 30%;">DESTINATION PREFIX</th>
+                    <th style="width: 15%;">FROM</th>
+                    <th style="width: 10%;">INFO</th>
+                    <th style="width: 20%;">STATUS & ACTIONS</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {#each laneCards as card (card.entityId)}
+                    <tr 
+                      draggable={!card.operation||['draft','failed'].includes(card.operation.state)} 
+                      ondragstart={()=>dragged=card.entityId}
+                      class:has-anomalies={card.anomalies.length > 0}
+                    >
+                      <td>
+                        <div class="title-cell">
+                          <strong>{card.title}</strong>
+                          {#if card.setTitle}<small class="set-name">SET: {card.setTitle}</small>{/if}
+                          {#if card.anomalies.length}
+                            <div class="anomalies-list">
+                              {#each card.anomalies as anomaly (anomaly)}
+                                <span class="anomaly-badge">{anomaly}</span>
+                              {/each}
+                            </div>
+                          {/if}
+                        </div>
+                      </td>
+                      <td>
+                        <div class="dest-cell">
+                          <input bind:value={card.destinationPrefix} />
+                        </div>
+                      </td>
+                      <td>
+                        <code class="path-code">{card.sourcePrefix}</code>
+                      </td>
+                      <td>
+                        <div class="info-cell">
+                          <span>{card.fileCount} files</span>
+                          <span>{formatBytes(card.sizeBytes)}</span>
+                        </div>
+                      </td>
+                      <td>
+                        <div class="actions-cell">
+                          {#if card.operation}
+                            <button class="operation-badge" onclick={()=>selected=card.operation} class:active={['copying','verifying','retiring'].includes(card.operation.state)}>
+                              <strong>{stateLabel(card.operation.state)}</strong>
+                              <span>{card.operation.error??card.operation.stage} ({progress(card.operation)}%)</span>
+                            </button>
+                            <div class="row-actions">
+                              {#if ['draft','failed'].includes(card.operation.state)}
+                                <button onclick={()=>plan(card)} class="sub-btn">UPDATE</button>
+                                <button class="sub-btn signal" onclick={()=>execute(card)}>COPY + VERIFY</button>
+                              {/if}
+                              {#if card.operation.state==='retirement_pending'}
+                                <button class="sub-btn danger" onclick={()=>retire(card)}>RETIRE SOURCES</button>
+                              {/if}
+                            </div>
+                          {:else}
+                            <button class="sub-btn signal wide" onclick={()=>plan(card)}>SAVE PLAN</button>
+                          {/if}
+                        </div>
+                      </td>
+                    </tr>
+                  {/each}
+                </tbody>
+              </table>
+            </div>
           </div>
-        </div>
+        {/if}
       {/each}
     </section>
 
-    <section class="video">
-      <header><div><span>VIDEO</span><strong>MOVIE DESTINATIONS</strong></div><small>Full destination includes filename. Sidecar subtitles follow the film.</small></header>
-      <div class="video-grid">
-        {#each videos as card (card.entityId)}
-          <article>
-            <div class="card-title"><span>VIDEO · {card.collectionCode.toUpperCase()}</span><strong>{card.title}</strong></div>
-            {#if card.anomalies.length}<ul>{#each card.anomalies as anomaly (anomaly)}<li>{anomaly}</li>{/each}</ul>{/if}
-            <label>FINAL DESTINATION<input bind:value={card.destinationPrefix} /></label>
-            <div class="path"><span>FROM</span><code>{card.sourcePrefix}</code></div>
-            <div class="facts"><span>{card.fileCount} FILES</span><span>{formatBytes(card.sizeBytes)}</span></div>
-            {#if card.operation}
-              <button class="operation" onclick={()=>selected=card.operation}><strong>{stateLabel(card.operation.state)}</strong><span>{card.operation.error??card.operation.stage} · {progress(card.operation)}%</span></button>
-              <div class="actions">
-                {#if ['draft','failed'].includes(card.operation.state)}<button onclick={()=>plan(card)}>UPDATE PLAN</button><button class="signal" onclick={()=>execute(card)}>COPY + VERIFY</button>{/if}
-                {#if card.operation.state==='retirement_pending'}<button class="danger" onclick={()=>retire(card)}>RETIRE VERIFIED SOURCES</button>{/if}
-              </div>
-            {:else}<button class="signal wide" onclick={()=>plan(card)}>SAVE PLAN</button>{/if}
-          </article>
-        {/each}
-      </div>
-    </section>
+    {#if videos.length}
+      <section class="video-list">
+        <header class="lane-header">
+          <strong>VIDEO</strong>
+          <span class="count">{videos.length} MOVIE DESTINATIONS</span>
+        </header>
+        <div class="table-container">
+          <table class="storage-table">
+            <thead>
+              <tr>
+                <th style="width: 25%;">MOVIE</th>
+                <th style="width: 30%;">FINAL DESTINATION</th>
+                <th style="width: 15%;">FROM</th>
+                <th style="width: 10%;">INFO</th>
+                <th style="width: 20%;">STATUS & ACTIONS</th>
+              </tr>
+            </thead>
+            <tbody>
+              {#each videos as card (card.entityId)}
+                <tr class:has-anomalies={card.anomalies.length > 0}>
+                  <td>
+                    <div class="title-cell">
+                      <strong>{card.title}</strong>
+                      {#if card.anomalies.length}
+                        <div class="anomalies-list">
+                          {#each card.anomalies as anomaly (anomaly)}
+                            <span class="anomaly-badge">{anomaly}</span>
+                          {/each}
+                        </div>
+                      {/if}
+                    </div>
+                  </td>
+                  <td>
+                    <div class="dest-cell">
+                      <input bind:value={card.destinationPrefix} />
+                    </div>
+                  </td>
+                  <td>
+                    <code class="path-code">{card.sourcePrefix}</code>
+                  </td>
+                  <td>
+                    <div class="info-cell">
+                      <span>{card.fileCount} files</span>
+                      <span>{formatBytes(card.sizeBytes)}</span>
+                    </div>
+                  </td>
+                  <td>
+                    <div class="actions-cell">
+                      {#if card.operation}
+                        <button class="operation-badge" onclick={()=>selected=card.operation} class:active={['copying','verifying','retiring'].includes(card.operation.state)}>
+                          <strong>{stateLabel(card.operation.state)}</strong>
+                          <span>{card.operation.error??card.operation.stage} ({progress(card.operation)}%)</span>
+                        </button>
+                        <div class="row-actions">
+                          {#if ['draft','failed'].includes(card.operation.state)}
+                            <button onclick={()=>plan(card)} class="sub-btn">UPDATE</button>
+                            <button class="sub-btn signal" onclick={()=>execute(card)}>COPY + VERIFY</button>
+                          {/if}
+                          {#if card.operation.state==='retirement_pending'}
+                            <button class="sub-btn danger" onclick={()=>retire(card)}>RETIRE SOURCES</button>
+                          {/if}
+                        </div>
+                      {:else}
+                        <button class="sub-btn signal wide" onclick={()=>plan(card)}>SAVE PLAN</button>
+                      {/if}
+                    </div>
+                  </td>
+                </tr>
+              {/each}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    {/if}
   {/if}
 </main>
 
@@ -254,12 +366,18 @@
       <div class="batch-list">
         {#each monitorOperations as operation (operation.id)}
           <button class="batch-row" onclick={()=>selected=operation}>
-            <div class="batch-name"><span>{operation.mediaKind.toUpperCase()}</span><strong>{operation.title}</strong><small>{stateLabel(operation.state)} · {operation.error??operation.stage}</small></div>
+            <div class="batch-name">
+              <span>{operation.mediaKind.toUpperCase()}</span>
+              <strong>{operation.title}</strong>
+              <small>{stateLabel(operation.state)} · {operation.error??operation.stage}</small>
+            </div>
             <div class="batch-progress"><i style={`width:${progress(operation)}%`}></i></div>
-            <span>{progress(operation)}%</span>
-            <span>{formatBytes(operation.speedBytesPerSecond)}/s</span>
-            <span>{elapsed(operation)} ELAPSED</span>
-            <span>{formatDuration(operation.etaSeconds)} LEFT</span>
+            <div class="batch-stats">
+              <span>{progress(operation)}%</span>
+              <span>{formatBytes(operation.speedBytesPerSecond)}/s</span>
+              <span>{elapsed(operation)} ELAPSED</span>
+              <span>{formatDuration(operation.etaSeconds)} LEFT</span>
+            </div>
           </button>
         {/each}
       </div>
@@ -270,8 +388,572 @@
 {#if message}<button class="message" onclick={()=>message=''}>{message}</button>{/if}
 
 <style>
-  main{min-height:calc(100dvh - 64px);background:#0a0b0a;color:#e7e9e2}.toolbar{position:sticky;z-index:10;top:64px;min-height:58px;padding:8px 14px;display:grid;grid-template-columns:auto minmax(200px,1fr) auto auto auto;gap:10px;align-items:center;border-bottom:1px solid var(--line);background:#0e100eee;backdrop-filter:blur(14px)}.toolbar>div{display:grid;gap:3px}.toolbar span,.toolbar label{color:var(--muted);font:8px ui-monospace,monospace}.toolbar strong{font:9px ui-monospace,monospace;color:var(--signal)}.toolbar input[type=search],.toolbar button{height:34px;border:1px solid #33362f;background:#171916;color:#e7e9e2;font:9px ui-monospace,monospace}.toolbar input[type=search]{padding:0 10px}.toolbar label{display:flex;gap:7px;align-items:center}.toolbar .bulk{border-color:var(--signal);color:var(--signal)}.toolbar button:disabled{opacity:.4}.protocol{min-height:44px;padding:0 16px;display:flex;gap:12px;align-items:center;border-bottom:1px solid var(--line);font:8px ui-monospace,monospace;color:var(--muted)}.protocol strong{color:var(--signal)}.protocol i{font-style:normal}.board{padding:14px;display:flex;gap:10px;align-items:flex-start;overflow:auto;border-bottom:1px solid var(--line)}.lane{width:310px;min-width:310px;max-height:68dvh;display:grid;grid-template-rows:auto minmax(0,1fr);background:#101210;border:1px solid #292c27}.lane>header,.video>header{padding:11px 12px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--line);font:9px ui-monospace,monospace}.lane>header span{color:var(--signal)}.stack{padding:6px;display:grid;gap:6px;overflow:auto}article{min-width:0;padding:11px;background:#171916;border:1px solid #292c27}.card-title{display:grid;gap:4px}.card-title span{color:var(--signal);font:7px ui-monospace,monospace}.card-title strong{font:14px Georgia,serif;font-weight:400}.card-title small{color:var(--muted);font:8px ui-monospace,monospace}ul{margin:9px 0;padding:7px 8px 7px 24px;background:#221d15;color:#e5bd6b;font:8px/1.5 ui-monospace,monospace}article label{margin-top:10px;display:grid;gap:4px;color:var(--muted);font:7px ui-monospace,monospace}article input{width:100%;height:32px;box-sizing:border-box;padding:0 7px;border:1px solid #343730;background:#0e100e;color:#fff;font:8px ui-monospace,monospace}.path{margin-top:8px;display:grid;gap:3px}.path span{color:var(--muted);font:7px ui-monospace,monospace}code{overflow-wrap:anywhere;color:#c4c8bf;font:8px/1.45 ui-monospace,monospace}.facts{margin:10px 0;display:flex;justify-content:space-between;color:var(--muted);font:8px ui-monospace,monospace}.operation{width:100%;padding:8px;display:grid;gap:4px;text-align:left;border:1px solid #33362f;background:#111310;color:#fff}.operation strong{color:var(--signal);font:8px ui-monospace,monospace}.operation span{color:var(--muted);font:7px ui-monospace,monospace}.actions{margin-top:6px;display:flex;gap:5px}.actions button,.wide{min-height:31px;flex:1;padding:5px 7px;border:1px solid #343730;background:#101210;color:#ddd;font:7px ui-monospace,monospace}.signal{border-color:var(--signal)!important;color:var(--signal)!important}.danger{border-color:#8d453b!important;color:#e69789!important}.wide{width:100%}.video{padding:18px 14px 300px}.video>header{padding-inline:0}.video>header>div{display:grid;gap:3px}.video>header span{color:var(--signal);font:8px ui-monospace,monospace}.video>header small{color:var(--muted);font:8px ui-monospace,monospace}.video-grid{padding-top:10px;display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:7px}.state{padding:30px;font:9px ui-monospace,monospace;color:var(--muted)}.modal{position:fixed;z-index:100;inset:0;padding:4dvh 4vw;display:grid;place-items:center;background:#000b}.dialog{width:min(1000px,92vw);max-height:90dvh;display:grid;grid-template-rows:auto auto auto minmax(0,1fr);overflow:hidden;border:1px solid #3a3e36;background:#101210}.modal header{padding:12px 14px;display:flex;justify-content:space-between;border-bottom:1px solid var(--line)}.modal header>div{display:grid;gap:4px}.modal header span{color:var(--muted);font:8px ui-monospace,monospace}.modal header strong{color:var(--signal);font:10px ui-monospace,monospace}.modal header button{border:0;background:transparent;color:#fff;font-size:22px}.meter{height:5px;background:#252821}.meter i{height:100%;display:block;background:var(--signal)}.monitor-facts{padding:8px 14px;display:flex;gap:20px;border-bottom:1px solid var(--line);font:8px ui-monospace,monospace;color:var(--muted)}.files{padding:8px;display:grid;gap:5px;overflow:auto}.files article{display:grid;grid-template-columns:90px minmax(0,1fr) 20px minmax(0,1fr);gap:7px;align-items:center}.files strong{color:var(--signal);font:7px ui-monospace,monospace}.files i{text-align:center;font-style:normal}.files small{grid-column:2/-1;color:#e69789}.error{margin:0;padding:9px 14px;background:#2a1715;color:#e69789;font:8px ui-monospace,monospace}.process-dock{position:fixed;z-index:80;left:0;right:0;bottom:0;max-height:min(42dvh,360px);display:grid;grid-template-rows:auto minmax(0,1fr);border-top:1px solid #3b4036;background:#0d0f0dec;box-shadow:0 -18px 42px #0008;backdrop-filter:blur(18px)}.process-dock:not(.open){display:block}.dock-head{width:100%;min-height:58px;padding:8px 14px;display:grid;grid-template-columns:minmax(190px,auto) minmax(120px,1fr) auto auto;gap:14px;align-items:center;border:0;background:transparent;color:#e7e9e2;text-align:left}.dock-head>div:first-child{display:grid;gap:4px}.dock-head span{font:8px ui-monospace,monospace;color:var(--muted)}.dock-head strong{font:9px ui-monospace,monospace;color:var(--signal)}.dock-head>b{font:16px ui-monospace,monospace;color:var(--signal)}.aggregate-meter,.batch-progress{height:5px;background:#262a23}.aggregate-meter i,.batch-progress i{display:block;height:100%;background:var(--signal)}.aggregate-facts{display:flex;gap:14px;white-space:nowrap}.aggregate-facts span{font-size:8px}.batch-list{padding:0 8px 8px;display:grid;gap:3px;overflow:auto}.batch-row{min-height:38px;padding:5px 7px;display:grid;grid-template-columns:minmax(180px,1.5fr) minmax(100px,1fr) 40px 85px 105px 85px;gap:10px;align-items:center;border:1px solid #282b26;background:#141613;color:#ccd0c6;text-align:left}.batch-name{min-width:0;display:grid;grid-template-columns:auto minmax(0,1fr);gap:2px 8px}.batch-name>span{grid-row:1/3;color:var(--signal);font:8px ui-monospace,monospace}.batch-name>strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font:11px Georgia,serif}.batch-name>small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted);font:7px ui-monospace,monospace}.batch-row>span{font:8px ui-monospace,monospace;color:var(--muted);white-space:nowrap}.message{position:fixed;z-index:110;left:18px;bottom:min(44dvh,375px);max-width:calc(100vw - 36px);padding:10px 14px;border:1px solid var(--signal);background:#111;color:#fff;font:9px ui-monospace,monospace}
-  .process-dock:not(.open)+.message{bottom:74px}
-  @media(max-width:1050px){.toolbar{grid-template-columns:1fr 1fr auto}.toolbar>div,.toolbar input[type=search]{grid-column:span 1}.toolbar label{grid-column:1}.toolbar .bulk{grid-column:2}.aggregate-facts span:nth-child(3){display:none}.batch-row{grid-template-columns:minmax(160px,1.5fr) minmax(90px,1fr) 40px 80px}.batch-row>span:nth-last-child(-n+2){display:none}}
-  @media(max-width:800px){.toolbar{grid-template-columns:1fr auto}.toolbar input[type=search]{grid-column:1/-1}.toolbar label,.toolbar .bulk{grid-column:auto}.protocol{overflow:auto;white-space:nowrap}.board{max-height:none}.lane{min-width:86vw}.files article{grid-template-columns:1fr}.files i{display:none}.monitor-facts{flex-wrap:wrap}.modal{padding:0}.dialog{width:100vw;max-height:100dvh}.video-grid{grid-template-columns:1fr}.video{padding-bottom:230px}.dock-head{grid-template-columns:1fr auto}.dock-head .aggregate-meter,.aggregate-facts{grid-column:1/-1}.batch-row{grid-template-columns:minmax(150px,1fr) 70px 34px}.batch-row>span:nth-last-child(-n+3){display:none}.message{bottom:230px}}
+  main {
+    min-height: calc(100dvh - 64px);
+    background: #0a0b0a;
+    color: #e7e9e2;
+    padding-bottom: 120px;
+  }
+  .toolbar {
+    position: sticky;
+    z-index: 10;
+    top: 64px;
+    min-height: 58px;
+    padding: 8px 14px;
+    display: grid;
+    grid-template-columns: auto minmax(200px, 1fr) auto auto auto;
+    gap: 10px;
+    align-items: center;
+    border-bottom: 1px solid var(--line);
+    background: #0e100eee;
+    backdrop-filter: blur(14px);
+  }
+  .toolbar>div {
+    display: grid;
+    gap: 3px;
+  }
+  .toolbar span, .toolbar label {
+    color: var(--muted);
+    font: 8px ui-monospace, monospace;
+  }
+  .toolbar strong {
+    font: 9px ui-monospace, monospace;
+    color: var(--signal);
+  }
+  .toolbar input[type=search], .toolbar button {
+    height: 34px;
+    border: 1px solid #33362f;
+    background: #171916;
+    color: #e7e9e2;
+    font: 9px ui-monospace, monospace;
+    padding: 0 10px;
+  }
+  .toolbar label {
+    display: flex;
+    gap: 7px;
+    align-items: center;
+  }
+  .toolbar .bulk {
+    border-color: var(--signal);
+    color: var(--signal);
+    cursor: pointer;
+  }
+  .toolbar button:disabled {
+    opacity: .4;
+    cursor: not-allowed;
+  }
+  .protocol {
+    min-height: 44px;
+    padding: 0 16px;
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    border-bottom: 1px solid var(--line);
+    font: 8px ui-monospace, monospace;
+    color: var(--muted);
+  }
+  .protocol strong {
+    color: var(--signal);
+  }
+  .protocol i {
+    font-style: normal;
+  }
+
+  /* Redesigned Board List view */
+  .board-list, .video-list {
+    padding: 18px 14px;
+  }
+  .lane-group {
+    margin-bottom: 30px;
+    border: 1px solid #232620;
+    background: #101210;
+  }
+  .lane-header {
+    padding: 12px 16px;
+    background: #141713;
+    border-bottom: 1px solid #232620;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-family: ui-monospace, monospace;
+  }
+  .lane-header strong {
+    font-size: 11px;
+    color: var(--signal);
+    letter-spacing: 0.08em;
+  }
+  .lane-header .count {
+    font-size: 9px;
+    color: var(--muted);
+  }
+  .table-container {
+    overflow-x: auto;
+  }
+  .storage-table {
+    width: 100%;
+    border-collapse: collapse;
+    text-align: left;
+    font-family: ui-monospace, monospace;
+    font-size: 10px;
+  }
+  .storage-table th {
+    padding: 10px 16px;
+    border-bottom: 1px solid #232620;
+    color: var(--muted);
+    font-weight: normal;
+    letter-spacing: 0.05em;
+  }
+  .storage-table td {
+    padding: 12px 16px;
+    border-bottom: 1px solid #1c1e19;
+    vertical-align: middle;
+  }
+  .storage-table tr:hover {
+    background: #151714;
+  }
+  .storage-table tr.has-anomalies {
+    border-left: 2px solid #e5bd6b;
+  }
+
+  .title-cell {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+  }
+  .title-cell strong {
+    font-family: Georgia, serif;
+    font-size: 13px;
+    font-weight: normal;
+    color: #f2f3ef;
+  }
+  .title-cell .set-name {
+    font-size: 8px;
+    color: var(--muted);
+  }
+  .anomalies-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin-top: 5px;
+  }
+  .anomaly-badge {
+    background: #2a2012;
+    color: #e5bd6b;
+    border: 1px solid #4a3818;
+    padding: 2px 6px;
+    font-size: 8px;
+    border-radius: 2px;
+  }
+
+  .dest-cell input {
+    width: 100%;
+    height: 28px;
+    padding: 0 8px;
+    background: #070807;
+    border: 1px solid #2b2e27;
+    color: #fff;
+    font-family: ui-monospace, monospace;
+    font-size: 9px;
+    box-sizing: border-box;
+  }
+  .dest-cell input:focus {
+    border-color: var(--signal);
+    outline: none;
+  }
+
+  .path-code {
+    font-size: 9px;
+    color: #a4a89f;
+    word-break: break-all;
+  }
+
+  .info-cell {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    color: var(--muted);
+  }
+
+  .actions-cell {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+  }
+  .operation-badge {
+    width: 100%;
+    padding: 6px 8px;
+    text-align: left;
+    background: #1b1e19;
+    border: 1px solid #2a2f26;
+    color: #fff;
+    cursor: pointer;
+    font-family: ui-monospace, monospace;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .operation-badge.active {
+    border-color: var(--signal);
+  }
+  .operation-badge strong {
+    color: var(--signal);
+    font-size: 9px;
+  }
+  .operation-badge span {
+    color: var(--muted);
+    font-size: 8px;
+  }
+
+  .row-actions {
+    display: flex;
+    gap: 4px;
+  }
+  .sub-btn {
+    flex: 1;
+    height: 24px;
+    padding: 0 6px;
+    font-size: 8px;
+    font-family: ui-monospace, monospace;
+    background: #161814;
+    border: 1px solid #2c3028;
+    color: #ccc;
+    cursor: pointer;
+  }
+  .sub-btn:hover {
+    border-color: #4c5245;
+    color: #fff;
+  }
+  .sub-btn.signal {
+    border-color: var(--signal) !important;
+    color: var(--signal) !important;
+  }
+  .sub-btn.danger {
+    border-color: #8d453b !important;
+    color: #e69789 !important;
+  }
+  .sub-btn.wide {
+    width: 100%;
+  }
+
+  .video-list {
+    margin-top: 10px;
+    padding-bottom: 250px;
+  }
+
+  .state {
+    padding: 30px;
+    font: 9px ui-monospace, monospace;
+    color: var(--muted);
+  }
+
+  /* Modal Dialog */
+  .modal {
+    position: fixed;
+    z-index: 100;
+    inset: 0;
+    padding: 4dvh 4vw;
+    display: grid;
+    place-items: center;
+    background: rgba(0, 0, 0, 0.75);
+  }
+  .dialog {
+    width: min(1000px, 92vw);
+    max-height: 90dvh;
+    display: grid;
+    grid-template-rows: auto auto auto minmax(0, 1fr);
+    overflow: hidden;
+    border: 1px solid #3a3e36;
+    background: #101210;
+  }
+  .modal header {
+    padding: 12px 14px;
+    display: flex;
+    justify-content: space-between;
+    border-bottom: 1px solid var(--line);
+  }
+  .modal header>div {
+    display: grid;
+    gap: 4px;
+  }
+  .modal header span {
+    color: var(--muted);
+    font: 8px ui-monospace, monospace;
+  }
+  .modal header strong {
+    color: var(--signal);
+    font: 10px ui-monospace, monospace;
+  }
+  .modal header button {
+    border: 0;
+    background: transparent;
+    color: #fff;
+    font-size: 22px;
+    cursor: pointer;
+  }
+  .meter {
+    height: 5px;
+    background: #252821;
+  }
+  .meter i {
+    height: 100%;
+    display: block;
+    background: var(--signal);
+  }
+  .monitor-facts {
+    padding: 8px 14px;
+    display: flex;
+    gap: 20px;
+    border-bottom: 1px solid var(--line);
+    font: 8px ui-monospace, monospace;
+    color: var(--muted);
+  }
+  .files {
+    padding: 8px;
+    display: grid;
+    gap: 5px;
+    overflow: auto;
+  }
+  .files article {
+    display: grid;
+    grid-template-columns: 90px minmax(0, 1fr) 20px minmax(0, 1fr);
+    gap: 7px;
+    align-items: center;
+    border: 1px solid #1c1e19;
+    padding: 8px;
+  }
+  .files strong {
+    color: var(--signal);
+    font: 7px ui-monospace, monospace;
+  }
+  .files i {
+    text-align: center;
+    font-style: normal;
+  }
+  .files small {
+    grid-column: 2/-1;
+    color: #e69789;
+  }
+  .error {
+    margin: 0;
+    padding: 9px 14px;
+    background: #2a1715;
+    color: #e69789;
+    font: 8px ui-monospace, monospace;
+  }
+
+  /* Premium Process Dock (Glassmorphism + Neon hints) */
+  .process-dock {
+    position: fixed;
+    z-index: 80;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    max-height: min(45dvh, 380px);
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr);
+    border-top: 1px solid var(--signal);
+    background: rgba(13, 15, 13, 0.92);
+    box-shadow: 0 -10px 30px rgba(198, 255, 82, 0.05);
+    backdrop-filter: blur(24px) saturate(180%);
+    transition: max-height 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  .process-dock:not(.open) {
+    display: block;
+    max-height: 58px;
+    overflow: hidden;
+  }
+  .dock-head {
+    width: 100%;
+    min-height: 58px;
+    padding: 8px 14px;
+    display: grid;
+    grid-template-columns: minmax(190px, auto) minmax(120px, 1fr) auto auto;
+    gap: 14px;
+    align-items: center;
+    border: 0;
+    background: transparent;
+    color: #e7e9e2;
+    text-align: left;
+    cursor: pointer;
+  }
+  .dock-head>div:first-child {
+    display: grid;
+    gap: 4px;
+  }
+  .dock-head span {
+    font: 8px ui-monospace, monospace;
+    color: var(--muted);
+  }
+  .dock-head strong {
+    font: 9px ui-monospace, monospace;
+    color: var(--signal);
+  }
+  .dock-head>b {
+    font: 16px ui-monospace, monospace;
+    color: var(--signal);
+  }
+  .aggregate-meter, .batch-progress {
+    height: 4px;
+    background: #1d211a;
+    border-radius: 2px;
+    overflow: hidden;
+  }
+  .aggregate-meter i, .batch-progress i {
+    display: block;
+    height: 100%;
+    background: var(--signal);
+    box-shadow: 0 0 8px var(--signal);
+  }
+  .aggregate-facts {
+    display: flex;
+    gap: 14px;
+    white-space: nowrap;
+  }
+  .aggregate-facts span {
+    font-size: 8px;
+    font-family: ui-monospace, monospace;
+  }
+
+  .batch-list {
+    padding: 0 10px 10px;
+    display: grid;
+    gap: 4px;
+    overflow-y: auto;
+  }
+  .batch-row {
+    min-height: 44px;
+    padding: 6px 12px;
+    display: grid;
+    grid-template-columns: 2fr 1fr 1.5fr;
+    gap: 12px;
+    align-items: center;
+    border: 1px solid #1f221c;
+    background: rgba(20, 22, 19, 0.6);
+    color: #ccd0c6;
+    text-align: left;
+    cursor: pointer;
+  }
+  .batch-row:hover {
+    border-color: var(--signal);
+    background: rgba(28, 31, 26, 0.8);
+  }
+  .batch-name {
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .batch-name>span {
+    color: var(--signal);
+    font: 8px ui-monospace, monospace;
+    border: 1px solid rgba(198, 255, 82, 0.2);
+    padding: 1px 4px;
+  }
+  .batch-name>strong {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font: 12px Georgia, serif;
+  }
+  .batch-name>small {
+    color: var(--muted);
+    font: 7px ui-monospace, monospace;
+    margin-left: 8px;
+  }
+  .batch-stats {
+    display: flex;
+    justify-content: space-between;
+    font: 8px ui-monospace, monospace;
+    color: var(--muted);
+  }
+  .batch-stats span {
+    white-space: nowrap;
+  }
+
+  .message {
+    position: fixed;
+    z-index: 110;
+    left: 18px;
+    bottom: min(47dvh, 395px);
+    max-width: calc(100vw - 36px);
+    padding: 10px 14px;
+    border: 1px solid var(--signal);
+    background: #111;
+    color: #fff;
+    font: 9px ui-monospace, monospace;
+    cursor: pointer;
+  }
+  .process-dock:not(.open)+.message {
+    bottom: 74px;
+  }
+
+  @media(max-width: 1050px) {
+    .toolbar {
+      grid-template-columns: 1fr 1fr auto;
+    }
+    .toolbar>div, .toolbar input[type=search] {
+      grid-column: span 1;
+    }
+    .toolbar label {
+      grid-column: 1;
+    }
+    .toolbar .bulk {
+      grid-column: 2;
+    }
+    .aggregate-facts span:nth-child(3) {
+      display: none;
+    }
+  }
+  @media(max-width: 800px) {
+    .toolbar {
+      grid-template-columns: 1fr auto;
+    }
+    .toolbar input[type=search] {
+      grid-column: 1/-1;
+    }
+    .toolbar label, .toolbar .bulk {
+      grid-column: auto;
+    }
+    .protocol {
+      overflow: auto;
+      white-space: nowrap;
+    }
+    .files article {
+      grid-template-columns: 1fr;
+    }
+    .files i {
+      display: none;
+    }
+    .monitor-facts {
+      flex-wrap: wrap;
+    }
+    .modal {
+      padding: 0;
+    }
+    .dialog {
+      width: 100vw;
+      max-height: 100dvh;
+    }
+    .video-list {
+      padding-bottom: 230px;
+    }
+    .dock-head {
+      grid-template-columns: 1fr auto;
+    }
+    .dock-head .aggregate-meter, .aggregate-facts {
+      grid-column: 1/-1;
+    }
+    .batch-row {
+      grid-template-columns: 1fr;
+      gap: 6px;
+    }
+    .batch-stats {
+      display: flex;
+      justify-content: flex-start;
+      gap: 10px;
+    }
+    .message {
+      bottom: 230px;
+    }
+  }
 </style>

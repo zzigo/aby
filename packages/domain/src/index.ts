@@ -244,7 +244,10 @@ export const CandidateMetadataSchema = z.object({
     checksumSha256: z.string(),
     technicalMetadata: TechnicalMetadataSchema,
     recordingTitle: z.string(),
-    trackNumber: z.number().int().positive().optional()
+    trackNumber: z.number().int().positive().optional(),
+    segmentStartMs: z.number().int().nonnegative().optional(),
+    segmentEndMs: z.number().int().positive().optional(),
+    sourceCueKey: z.string().optional()
   })).optional()
 });
 export type CandidateMetadata = z.infer<typeof CandidateMetadataSchema>;
@@ -308,10 +311,12 @@ export const CommitIngestSchema = z.object({
   releaseDate: z.string().trim().max(500).optional(),
   label: z.string().trim().max(500).optional(),
   catalogNumber: z.string().trim().max(500).optional(),
+  canonicalObjectKey: z.string().min(1).optional(),
   tracks: z.array(z.object({
     objectKey: z.string().min(1),
     recordingTitle: z.string().trim().min(1).max(500),
-    trackNumber: z.number().int().positive().optional()
+    trackNumber: z.number().int().positive().optional(),
+    canonicalObjectKey: z.string().min(1).optional()
   })).optional()
 });
 export type CommitIngest = z.infer<typeof CommitIngestSchema>;

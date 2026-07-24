@@ -47,6 +47,7 @@ export interface SourceRetirementCandidate {
 export interface AbyRepository {
   savePreview(preview: IngestPreview): Promise<IngestPreview>;
   getPreview(ownerId: string, previewId: string): Promise<IngestPreview | null>;
+  updatePreviewMetadata(ownerId: string, previewId: string, candidateMetadata: any): Promise<void>;
   markPreviewPromoted(ownerId: string, previewId: string, sourceObjectKey: string, targetObjectKey: string, updatedCandidateMetadata?: any): Promise<IngestPreview>;
   commitPreview(
     ownerId: string,
@@ -136,6 +137,14 @@ export class MemoryAbyRepository implements AbyRepository {
   async getPreview(ownerId: string, previewId: string): Promise<IngestPreview | null> {
     const preview = this.#previews.get(previewId);
     return preview?.ownerId === ownerId ? structuredClone(preview) : null;
+  }
+
+  async updatePreviewMetadata(ownerId: string, previewId: string, candidateMetadata: any): Promise<void> {
+    const preview = this.#previews.get(previewId);
+    if (preview && preview.ownerId === ownerId) {
+      preview.candidateMetadata = candidateMetadata;
+      this.#previews.set(previewId, preview);
+    }
   }
 
   async markPreviewPromoted(ownerId: string, previewId: string, sourceObjectKey: string, targetObjectKey: string, updatedCandidateMetadata?: any): Promise<IngestPreview> {
@@ -561,6 +570,13 @@ export class PostgresAbyRepository implements AbyRepository {
       [previewId, ownerId]
     );
     return result.rows[0] ? mapPreview(result.rows[0]) : null;
+  }
+
+  async updatePreviewMetadata(ownerId: string, previewId: string, candidateMetadata: any): Promise<void> {
+    await this.#pool.query(
+      'UPDATE aby.ingest_candidates SET candidate_metadata = $1 WHERE id = $2 AND owner_id = $3',
+      [candidateMetadata, previewId, ownerId]
+    );
   }
 
   async markPreviewPromoted(ownerId: string, previewId: string, sourceObjectKey: string, targetObjectKey: string, updatedCandidateMetadata?: any): Promise<IngestPreview> {

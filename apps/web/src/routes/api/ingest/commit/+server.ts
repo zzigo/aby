@@ -9,6 +9,30 @@ export const POST: RequestHandler = (event) => api('ingest.commit', async () => 
   const ownerId = ownerFor(event);
   const repository = getRepository();
   let preview = await repository.getPreview(ownerId, input.previewId);
+  if (preview) {
+    let updated = false;
+    if (input.canonicalObjectKey && input.canonicalObjectKey !== preview.candidateMetadata.canonicalObjectKey) {
+      preview.candidateMetadata.canonicalObjectKey = input.canonicalObjectKey;
+      updated = true;
+    }
+    if (input.tracks && preview.candidateMetadata.tracks) {
+      for (const inputTrack of input.tracks) {
+        const matchedTrack = preview.candidateMetadata.tracks.find(t => 
+          t.objectKey === inputTrack.objectKey && 
+          t.trackNumber === inputTrack.trackNumber
+        ) || preview.candidateMetadata.tracks.find(t => t.objectKey === inputTrack.objectKey);
+        
+        if (matchedTrack && inputTrack.canonicalObjectKey && inputTrack.canonicalObjectKey !== matchedTrack.canonicalObjectKey) {
+          matchedTrack.canonicalObjectKey = inputTrack.canonicalObjectKey;
+          updated = true;
+        }
+      }
+    }
+    if (updated) {
+      await repository.updatePreviewMetadata(ownerId, preview.id, preview.candidateMetadata);
+    }
+  }
+
   let sourceRetirement: { objectKey: string; state: 'candidate' } | undefined;
   if (preview?.candidateMetadata.canonicalObjectKey
     && preview.candidateMetadata.canonicalObjectKey !== preview.objectKey) {

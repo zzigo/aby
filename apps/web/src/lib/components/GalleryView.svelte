@@ -6,7 +6,11 @@
   type TileSize = 'small' | 'medium' | 'large';
   type GroupBy = 'none' | 'tags' | 'artist' | 'year' | 'composer' | 'collection' | 'set';
   type SortBy = 'title' | 'artist' | 'year' | 'composer' | 'collection' | 'set';
-  let { items, onselect }: { items: CatalogItem[]; onselect: (item: CatalogItem) => void } = $props();
+  let { items, onselect, ondelete }: { 
+    items: CatalogItem[]; 
+    onselect: (item: CatalogItem) => void;
+    ondelete: (item: CatalogItem) => void;
+  } = $props();
   let sidebarOpen = $state(false);
   let showTitle = $state(true);
   let showYear = $state(true);
@@ -17,6 +21,49 @@
   let sortBy = $state<SortBy>('title');
   let sortDescending = $state(false);
   let touchStart = { x: 0, y: 0 };
+
+  let albumTouchStartX = 0;
+  let activeSwipeKey = $state<string | null>(null);
+  let activeSwipeOffset = $state(0);
+
+  function onAlbumTouchStart(event: TouchEvent, key: string) {
+    const touch = event.touches[0];
+    if (touch) {
+      albumTouchStartX = touch.clientX;
+      activeSwipeKey = key;
+      activeSwipeOffset = 0;
+    }
+  }
+
+  function onAlbumTouchMove(event: TouchEvent) {
+    if (!activeSwipeKey) return;
+    const touch = event.touches[0];
+    if (touch) {
+      const dx = touch.clientX - albumTouchStartX;
+      if (dx < 0) {
+        activeSwipeOffset = dx;
+      } else {
+        activeSwipeOffset = 0;
+      }
+    }
+  }
+
+  function onAlbumTouchEnd(event: TouchEvent, item: CatalogItem) {
+    if (!activeSwipeKey) return;
+    if (activeSwipeOffset < -100) {
+      ondelete(item);
+    }
+    activeSwipeKey = null;
+    activeSwipeOffset = 0;
+  }
+
+  function handleSelect(item: CatalogItem, event: MouseEvent) {
+    if (activeSwipeOffset < -10) {
+      event.preventDefault();
+      return;
+    }
+    onselect(item);
+  }
 
   const albums = $derived.by(() => {
     const groups = new SvelteMap<string, CatalogItem>();
@@ -186,19 +233,31 @@
         {#if groupBy !== 'none'}<h2>{group.label}<small>{group.items.length}</small></h2>{/if}
         <div class="gallery-grid" class:small={tileSize === 'small'} class:large={tileSize === 'large'}>
           {#each group.items as item (item.albumId ?? item.asset.workId)}
-            <button class="gallery-album" onclick={() => onselect(item)}>
-              <span class="gallery-cover">
-                {#if item.coverUrl}<img src={item.coverUrl} alt="" />{:else}<span>{albumTitle(item).slice(0, 1)}</span>{/if}
-              </span>
-              {#if showTitle || showYear || showArtist || showTags}
-                <span class="gallery-meta">
-                  {#if showTitle}<strong>{albumTitle(item)}</strong>{/if}
-                  {#if showArtist}<small>{artist(item)}</small>{/if}
-                  {#if showYear}<small>{item.releaseDate ?? '—'}</small>{/if}
-                  {#if showTags && tags(item).length}<small>{tags(item).join(' · ')}</small>{/if}
+            <div class="swipe-container" style="position: relative; overflow: hidden; background: #000;">
+              <div class="swipe-delete-indicator" style="position: absolute; inset: 0; display: flex; align-items: center; justify-content: flex-end; padding-right: 20px; background: #8d453b; color: #fff; font-family: ui-monospace, monospace; font-size: 10px; font-weight: bold; pointer-events: none;">
+                DELETE
+              </div>
+              <button 
+                class="gallery-album" 
+                onclick={(e) => handleSelect(item, e)}
+                ontouchstart={(e) => onAlbumTouchStart(e, item.albumId ?? `work:${item.asset.workId}`)}
+                ontouchmove={onAlbumTouchMove}
+                ontouchend={(e) => onAlbumTouchEnd(e, item)}
+                style={activeSwipeKey === (item.albumId ?? `work:${item.asset.workId}`) ? `transform: translateX(${activeSwipeOffset}px); transition: none; width: 100%;` : `transform: translateX(0); transition: transform 0.2s ease; width: 100%;`}
+              >
+                <span class="gallery-cover">
+                  {#if item.coverUrl}<img src={item.coverUrl} alt="" />{:else}<span>{albumTitle(item).slice(0, 1)}</span>{/if}
                 </span>
-              {/if}
-            </button>
+                {#if showTitle || showYear || showArtist || showTags}
+                  <span class="gallery-meta">
+                    {#if showTitle}<strong>{albumTitle(item)}</strong>{/if}
+                    {#if showArtist}<small>{artist(item)}</small>{/if}
+                    {#if showYear}<small>{item.releaseDate ?? '—'}</small>{/if}
+                    {#if showTags && tags(item).length}<small>{tags(item).join(' · ')}</small>{/if}
+                  </span>
+                {/if}
+              </button>
+            </div>
           {/each}
         </div>
       </section>
