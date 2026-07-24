@@ -1,3 +1,6 @@
+import dns from 'node:dns';
+dns.setDefaultResultOrder('ipv4first');
+
 import { handleLogto, UserScope } from '@logto/sveltekit';
 import type { Handle } from '@sveltejs/kit';
 import { env } from '$env/dynamic/private';
